@@ -12,6 +12,32 @@ $password = 'Levelminds@2024';
 
 $message = null;
 $error = null;
+$hasCategoryColumn = null;
+
+function ensureBlogCategoryColumn(PDO $pdo)
+{
+    try {
+        $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
+        if ($check && $check->fetch()) {
+            return true;
+        }
+
+        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
+        return true;
+    } catch (PDOException $e) {
+        return false;
+    }
+}
+
+try {
+    $pdoSchema = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    ]);
+    $hasCategoryColumn = ensureBlogCategoryColumn($pdoSchema);
+    $pdoSchema = null;
+} catch (PDOException $e) {
+    $hasCategoryColumn = false;
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $title = trim($_POST['title'] ?? '');
@@ -20,9 +46,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $content = trim($_POST['content'] ?? '');
     $mediaType = $_POST['media_type'] ?? 'photo';
     $mediaUrl = trim($_POST['media_url'] ?? '');
+    $category = $_POST['category'] ?? 'general';
     $views = max(0, (int)($_POST['views'] ?? 0));
     $likes = max(0, (int)($_POST['likes'] ?? 0));
     $responses = max(0, (int)($_POST['responses'] ?? 0));
+
+    $allowedCategories = ['teachers', 'schools', 'general'];
+    if (!in_array($category, $allowedCategories, true)) {
+        $category = 'general';
+    }
 
     if ($title === '' || $summary === '' || $content === '') {
         $error = 'Please fill in the required fields (title, summary, and content).';
@@ -67,8 +99,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 ]);
 
-                $stmt = $pdo->prepare('INSERT INTO blog_posts (title, author, summary, content, media_type, media_url, views, likes, responses) VALUES (:title, :author, :summary, :content, :media_type, :media_url, :views, :likes, :responses)');
-                $stmt->execute([
+                $hasCategoryColumn = ensureBlogCategoryColumn($pdo);
+                $columns = 'title, author, summary, content, media_type, media_url, views, likes, responses';
+                $placeholders = ':title, :author, :summary, :content, :media_type, :media_url, :views, :likes, :responses';
+                $params = [
                     'title' => $title,
                     'author' => $author,
                     'summary' => $summary,
@@ -78,7 +112,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'views' => $views,
                     'likes' => $likes,
                     'responses' => $responses,
-                ]);
+                ];
+
+                if ($hasCategoryColumn) {
+                    $columns = 'title, author, summary, content, media_type, media_url, category, views, likes, responses';
+                    $placeholders = ':title, :author, :summary, :content, :media_type, :media_url, :category, :views, :likes, :responses';
+                    $params['category'] = $category;
+                }
+
+                $stmt = $pdo->prepare("INSERT INTO blog_posts ($columns) VALUES ($placeholders)");
+                $stmt->execute($params);
                 $message = 'Blog post saved successfully.';
             } catch (PDOException $e) {
                 $error = 'Database error: ' . htmlspecialchars($e->getMessage());
@@ -104,6 +147,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     .admin-nav nav a { margin-left: 18px; text-decoration: none; color: #51617A; font-weight: 500; }
     .admin-nav nav a.active, .admin-nav nav a:hover { color: #3C8DFF; }
     .admin-card { background: #ffffff; border-radius: 18px; box-shadow: 0 20px 60px rgba(15, 46, 91, 0.08); padding: 32px; }
+    .rich-editor { border: 1px solid #dbe4f3; border-radius: 14px; overflow: hidden; background: #ffffff; box-shadow: inset 0 1px 2px rgba(15, 46, 91, 0.06); }
+    .rich-toolbar { display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.45rem 0.55rem; background: #f0f5ff; border-bottom: 1px solid #dbe4f3; }
+    .rich-toolbar button { border: none; background: transparent; color: #405275; border-radius: 8px; width: 2.2rem; height: 2.2rem; display: inline-flex; align-items: center; justify-content: center; font-size: 1rem; transition: background 0.2s ease, color 0.2s ease; }
+    .rich-toolbar button:focus { outline: none; box-shadow: 0 0 0 2px rgba(60, 141, 255, 0.25); }
+    .rich-toolbar button:hover, .rich-toolbar button.is-active { background: rgba(60, 141, 255, 0.12); color: #2a62d5; }
+    .rich-toolbar select { border-radius: 8px; border: 1px solid #c7d3e8; padding: 0.25rem 0.5rem; background: #ffffff; color: #2f3f5d; font-size: 0.85rem; }
+    .rich-content { min-height: 160px; padding: 0.9rem; font-size: 0.98rem; line-height: 1.6; color: #23324d; }
+    .rich-content:focus { outline: none; box-shadow: inset 0 0 0 2px rgba(60, 141, 255, 0.18); }
+    .rich-content[data-empty="true"]::before { content: attr(data-placeholder); color: #8ea2c2; pointer-events: none; }
+    .rich-content a { color: #2a62d5; text-decoration: underline; }
+    .rich-content ul, .rich-content ol { padding-left: 1.25rem; margin-bottom: 0.75rem; }
+    textarea.js-rich-editor.js-rich-source-hidden { display: none !important; }
   </style>
 </head>
 <body>
@@ -133,11 +188,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           <label class="form-label fw-semibold">Title *</label>
           <input type="text" name="title" class="form-control" required>
         </div>
-        <div class="col-md-6">
+        <div class="col-md-4">
           <label class="form-label fw-semibold">Author</label>
           <input type="text" name="author" class="form-control" placeholder="LevelMinds Team">
         </div>
-        <div class="col-md-6">
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Audience Category *</label>
+          <?php if ($hasCategoryColumn): ?>
+          <select name="category" class="form-select" required>
+            <option value="teachers">For Teachers</option>
+            <option value="schools">For Schools</option>
+            <option value="general" selected>General Insights</option>
+          </select>
+          <?php else: ?>
+          <input type="hidden" name="category" value="general">
+          <div class="form-text text-muted">Categories will default to General until the database is updated.</div>
+          <?php endif; ?>
+        </div>
+        <div class="col-md-4">
           <label class="form-label fw-semibold">Blog Type *</label>
           <select name="media_type" class="form-select" required>
             <option value="photo">Photo Blog</option>
@@ -156,11 +224,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Short Summary *</label>
-          <textarea name="summary" class="form-control" rows="2" required></textarea>
+          <textarea name="summary" class="form-control js-rich-editor" rows="2" placeholder="Write a short summary that appears on the blog card." required></textarea>
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Main Content *</label>
-          <textarea name="content" class="form-control" rows="8" required></textarea>
+          <textarea name="content" class="form-control js-rich-editor" rows="8" placeholder="Share the full story, add headings, and include helpful links." required></textarea>
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Initial Views</label>
@@ -184,5 +252,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <div data-global-footer></div>
   <script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
   <script src="assets/js/footer.js"></script>
+  <script src="assets/js/admin-editor.js"></script>
 </body>
 </html>

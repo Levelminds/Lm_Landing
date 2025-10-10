@@ -14,7 +14,7 @@ try {
 
     $pdo->exec("USE `$dbname`");
 
-    $pdo->exec("DROP TABLE IF EXISTS blog_posts, admin_users, newsletter_subscribers, contact_messages, registrations");
+    $pdo->exec("DROP TABLE IF EXISTS blog_likes, blog_posts, admin_users, newsletter_subscribers, contact_messages, registrations");
     echo "Existing tables dropped.\n";
 
     $pdo->exec(<<<SQL
@@ -37,6 +37,7 @@ CREATE TABLE blog_posts (
   content LONGTEXT NOT NULL,
   media_type ENUM('photo','video') NOT NULL DEFAULT 'photo',
   media_url VARCHAR(500) NOT NULL,
+  category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general',
   views INT NOT NULL DEFAULT 0,
   likes INT NOT NULL DEFAULT 0,
   responses INT NOT NULL DEFAULT 0,
@@ -44,7 +45,25 @@ CREATE TABLE blog_posts (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NULL DEFAULT NULL,
   INDEX idx_media_type (media_type),
-  INDEX idx_status (status)
+  INDEX idx_status (status),
+  INDEX idx_category (category)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+SQL);
+
+    $pdo->exec(<<<SQL
+CREATE TABLE IF NOT EXISTS blog_likes (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  post_id INT NOT NULL,
+  visitor_token VARCHAR(64) NOT NULL,
+  email VARCHAR(255) NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_like (post_id, visitor_token),
+  KEY idx_token (visitor_token),
+  KEY idx_email (email),
+  CONSTRAINT fk_blog_likes_post
+    FOREIGN KEY (post_id)
+    REFERENCES blog_posts(id)
+    ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 SQL);
 
