@@ -8,56 +8,26 @@ $posts = [];
 $error = '';
 $hasCategoryColumn = false;
 
-function blogCategoryColumnExists(PDO $pdo)
-{
-    try {
-        $stmt = $pdo->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'blog_posts' AND COLUMN_NAME = 'category'");
-        return (bool) $stmt->fetchColumn();
-    } catch (PDOException $e) {
-        try {
-            $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
-            return $check && $check->fetch();
-        } catch (PDOException $inner) {
-            return false;
-        }
-    }
-}
-
 function ensureBlogCategoryColumn(PDO $pdo)
 {
-    if (blogCategoryColumnExists($pdo)) {
-        return true;
-    }
-
     try {
+        $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
+        if ($check && $check->fetch()) {
+            return true;
+        }
+
         $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
+        return true;
     } catch (PDOException $e) {
         return false;
     }
-
-    return blogCategoryColumnExists($pdo);
 }
 
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     ]);
-    $hasCategoryColumn = ensureBlogCategoryColumn($pdo);
-    $columns = 'id, title, author, summary, content, media_type, media_url, created_at, views, likes';
-    if ($hasCategoryColumn) {
-        $columns .= ', category';
-    }
-
-    try {
-        $stmt = $pdo->query("SELECT $columns FROM blog_posts WHERE status = 'published' ORDER BY created_at DESC");
-    } catch (PDOException $queryException) {
-        if ($hasCategoryColumn) {
-            $hasCategoryColumn = false;
-            $stmt = $pdo->query("SELECT id, title, author, summary, content, media_type, media_url, created_at, views, likes FROM blog_posts WHERE status = 'published' ORDER BY created_at DESC");
-        } else {
-            throw $queryException;
-        }
-    }
+    $stmt = $pdo->query("SELECT id, title, author, summary, content, media_type, media_url, category, created_at, views, likes FROM blog_posts WHERE status = 'published' ORDER BY created_at DESC");
     $posts = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     $error = 'Unable to load blog posts right now.';
@@ -105,7 +75,7 @@ $audienceLabels = [
 
 $groupedPosts = [];
 foreach ($posts as $post) {
-    $category = $hasCategoryColumn ? ($post['category'] ?? 'general') : 'general';
+    $category = $post['category'] ?? 'general';
     if (!isset($groupedPosts[$category])) {
         $groupedPosts[$category] = [];
     }
@@ -114,7 +84,7 @@ foreach ($posts as $post) {
 
 if ($featured) {
     $featuredId = (int)($featured['id'] ?? 0);
-    $featuredCategory = $hasCategoryColumn ? ($featured['category'] ?? 'general') : 'general';
+    $featuredCategory = $featured['category'] ?? 'general';
     if ($featuredId && isset($groupedPosts[$featuredCategory])) {
         $groupedPosts[$featuredCategory] = array_values(array_filter(
             $groupedPosts[$featuredCategory],
@@ -301,7 +271,7 @@ foreach ($availableCategories as $category) {
         </div>
       <?php else: ?>
         <?php
-          $featuredCategory = $hasCategoryColumn ? ($featured['category'] ?? 'general') : 'general';
+          $featuredCategory = $featured['category'] ?? 'general';
           $featuredLabel = $audienceLabels[$featuredCategory] ?? ucfirst($featuredCategory);
           $featuredViews = (int)($featured['views'] ?? 0);
           $featuredLikes = (int)($featured['likes'] ?? 0);

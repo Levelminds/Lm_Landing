@@ -20,34 +20,19 @@ $message = '';
 $error = '';
 $hasCategoryColumn = false;
 
-function blogCategoryColumnExists(PDO $pdo)
-{
-    try {
-        $stmt = $pdo->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'blog_posts' AND COLUMN_NAME = 'category'");
-        return (bool) $stmt->fetchColumn();
-    } catch (PDOException $e) {
-        try {
-            $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
-            return $check && $check->fetch();
-        } catch (PDOException $inner) {
-            return false;
-        }
-    }
-}
-
 function ensureBlogCategoryColumn(PDO $pdo)
 {
-    if (blogCategoryColumnExists($pdo)) {
-        return true;
-    }
-
     try {
+        $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
+        if ($check && $check->fetch()) {
+            return true;
+        }
+
         $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
+        return true;
     } catch (PDOException $e) {
         return false;
     }
-
-    return blogCategoryColumnExists($pdo);
 }
 
 try {
@@ -83,12 +68,8 @@ try {
         $likes = max(0, (int)($_POST['likes'] ?? $post['likes']));
         $responses = max(0, (int)($_POST['responses'] ?? $post['responses']));
 
-        if ($hasCategoryColumn) {
-            $allowedCategories = ['teachers', 'schools', 'general'];
-            if (!in_array($category, $allowedCategories, true)) {
-                $category = 'general';
-            }
-        } else {
+        $allowedCategories = ['teachers', 'schools', 'general'];
+        if (!in_array($category, $allowedCategories, true)) {
             $category = 'general';
         }
 
@@ -130,14 +111,15 @@ try {
             }
 
             if (!$error) {
-                $sql = 'UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id';
-                $params = [
+                $update = $pdo->prepare('UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, category = :category, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id');
+                $update->execute([
                     'title' => $title,
                     'author' => $author,
                     'summary' => $summary,
                     'content' => $content,
                     'media_type' => $mediaType,
                     'media_url' => $mediaUrl,
+                    'category' => $category,
                     'status' => $status,
                     'views' => $views,
                     'likes' => $likes,
@@ -150,20 +132,8 @@ try {
                     $params['category'] = $category;
                 }
 
-                try {
-                    $update = $pdo->prepare($sql);
-                    $update->execute($params);
-                } catch (PDOException $updateException) {
-                    if ($hasCategoryColumn) {
-                        $hasCategoryColumn = false;
-                        unset($params['category']);
-                        $sql = 'UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id';
-                        $update = $pdo->prepare($sql);
-                        $update->execute($params);
-                    } else {
-                        throw $updateException;
-                    }
-                }
+                $update = $pdo->prepare($sql);
+                $update->execute($params);
 
                 $stmt->execute(['id' => $id]);
                 $post = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -238,16 +208,11 @@ try {
         <div class="col-md-3">
           <label class="form-label fw-semibold">Audience Category *</label>
           <?php $currentCategory = $post['category'] ?? 'general'; ?>
-          <?php if ($hasCategoryColumn): ?>
           <select name="category" class="form-select" required>
             <option value="teachers" <?php echo $currentCategory === 'teachers' ? 'selected' : ''; ?>>For Teachers</option>
             <option value="schools" <?php echo $currentCategory === 'schools' ? 'selected' : ''; ?>>For Schools</option>
             <option value="general" <?php echo $currentCategory === 'general' ? 'selected' : ''; ?>>General Insights</option>
           </select>
-          <?php else: ?>
-          <input type="hidden" name="category" value="general">
-          <div class="form-text text-muted">Categories will default to General until the database is updated.</div>
-          <?php endif; ?>
         </div>
         <div class="col-md-3">
           <label class="form-label fw-semibold">Blog Type *</label>
@@ -291,11 +256,11 @@ try {
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Short Summary *</label>
-          <textarea name="summary" class="form-control js-rich-editor" rows="2" placeholder="Write a short summary that appears on the blog card." required><?php echo htmlspecialchars_decode($post['summary'] ?? '', ENT_QUOTES); ?></textarea>
+          <textarea name="summary" class="form-control js-rich-editor" rows="2" required><?php echo htmlspecialchars_decode($post['summary'] ?? '', ENT_QUOTES); ?></textarea>
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Main Content *</label>
-          <textarea name="content" class="form-control js-rich-editor" rows="8" placeholder="Share the full story, add headings, and include helpful links." required><?php echo htmlspecialchars_decode($post['content'] ?? '', ENT_QUOTES); ?></textarea>
+          <textarea name="content" class="form-control js-rich-editor" rows="8" required><?php echo htmlspecialchars_decode($post['content'] ?? '', ENT_QUOTES); ?></textarea>
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Views</label>
@@ -320,7 +285,38 @@ try {
   <div data-global-footer></div>
   <script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
   <script src="assets/js/footer.js"></script>
-  <script src="assets/js/admin-editor.js"></script>
+  <script src="https://cdn.tiny.cloud/1/no-api-key/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      if (typeof tinymce === 'undefined') {
+        return;
+      }
+
+      tinymce.init({
+        selector: 'textarea.js-rich-editor',
+        menubar: false,
+        branding: false,
+        plugins: 'lists link table image media code fullscreen autoresize',
+        toolbar: 'undo redo | blocks | bold italic underline | alignleft aligncenter alignright alignjustify | bullist numlist | link table | removeformat | code fullscreen',
+        min_height: 220,
+        autoresize_bottom_margin: 16,
+        convert_urls: false,
+        setup: (editor) => {
+          editor.on('change keyup setcontent', () => {
+            editor.save();
+          });
+        }
+      });
+
+      document.querySelectorAll('form').forEach((form) => {
+        form.addEventListener('submit', () => {
+          if (typeof tinymce !== 'undefined') {
+            tinymce.triggerSave();
+          }
+        });
+      });
+    });
+  </script>
 </body>
 </html>
 
