@@ -27,12 +27,7 @@ try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     ]);
-    $hasCategoryColumn = ensureBlogCategoryColumn($pdo);
-    $columns = 'id, title, author, summary, content, media_type, media_url, created_at, views, likes';
-    if ($hasCategoryColumn) {
-        $columns .= ', category';
-    }
-    $stmt = $pdo->query("SELECT $columns FROM blog_posts WHERE status = 'published' ORDER BY created_at DESC");
+    $stmt = $pdo->query("SELECT id, title, author, summary, content, media_type, media_url, category, created_at, views, likes FROM blog_posts WHERE status = 'published' ORDER BY created_at DESC");
     $posts = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     $error = 'Unable to load blog posts right now.';
@@ -80,7 +75,7 @@ $audienceLabels = [
 
 $groupedPosts = [];
 foreach ($posts as $post) {
-    $category = $hasCategoryColumn ? ($post['category'] ?? 'general') : 'general';
+    $category = $post['category'] ?? 'general';
     if (!isset($groupedPosts[$category])) {
         $groupedPosts[$category] = [];
     }
@@ -89,7 +84,7 @@ foreach ($posts as $post) {
 
 if ($featured) {
     $featuredId = (int)($featured['id'] ?? 0);
-    $featuredCategory = $hasCategoryColumn ? ($featured['category'] ?? 'general') : 'general';
+    $featuredCategory = $featured['category'] ?? 'general';
     if ($featuredId && isset($groupedPosts[$featuredCategory])) {
         $groupedPosts[$featuredCategory] = array_values(array_filter(
             $groupedPosts[$featuredCategory],
@@ -276,7 +271,7 @@ foreach ($availableCategories as $category) {
         </div>
       <?php else: ?>
         <?php
-          $featuredCategory = $hasCategoryColumn ? ($featured['category'] ?? 'general') : 'general';
+          $featuredCategory = $featured['category'] ?? 'general';
           $featuredLabel = $audienceLabels[$featuredCategory] ?? ucfirst($featuredCategory);
           $featuredViews = (int)($featured['views'] ?? 0);
           $featuredLikes = (int)($featured['likes'] ?? 0);

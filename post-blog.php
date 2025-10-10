@@ -99,16 +99,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 ]);
 
-                $hasCategoryColumn = ensureBlogCategoryColumn($pdo);
-                $columns = 'title, author, summary, content, media_type, media_url, views, likes, responses';
-                $placeholders = ':title, :author, :summary, :content, :media_type, :media_url, :views, :likes, :responses';
-                $params = [
+                $stmt = $pdo->prepare('INSERT INTO blog_posts (title, author, summary, content, media_type, media_url, category, views, likes, responses) VALUES (:title, :author, :summary, :content, :media_type, :media_url, :category, :views, :likes, :responses)');
+                $stmt->execute([
                     'title' => $title,
                     'author' => $author,
                     'summary' => $summary,
                     'content' => $content,
                     'media_type' => $mediaType,
                     'media_url' => $mediaUrl,
+                    'category' => $category,
                     'views' => $views,
                     'likes' => $likes,
                     'responses' => $responses,
@@ -182,16 +181,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Audience Category *</label>
-          <?php if ($hasCategoryColumn): ?>
           <select name="category" class="form-select" required>
             <option value="teachers">For Teachers</option>
             <option value="schools">For Schools</option>
             <option value="general" selected>General Insights</option>
           </select>
-          <?php else: ?>
-          <input type="hidden" name="category" value="general">
-          <div class="form-text text-muted">Categories will default to General until the database is updated.</div>
-          <?php endif; ?>
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Blog Type *</label>
@@ -240,7 +234,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <div data-global-footer></div>
   <script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
   <script src="assets/js/footer.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tinymce@6.7.0/tinymce.min.js" referrerpolicy="origin"></script>
+  <script src="https://cdn.tiny.cloud/1/no-api-key/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
   <script>
     document.addEventListener('DOMContentLoaded', () => {
       if (typeof tinymce === 'undefined') {
