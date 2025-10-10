@@ -111,7 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'views' => $views,
                     'likes' => $likes,
                     'responses' => $responses,
-                ];
+                ]);
 
                 if ($hasCategoryColumn) {
                     $columns = 'title, author, summary, content, media_type, media_url, category, views, likes, responses';
