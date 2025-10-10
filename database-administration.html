@@ -1,0 +1,802 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Database Administration | Backup, Tuning & Recovery | LevelMinds</title>
+  <meta name="description" content="DB install, tuning, backup and recovery, and high availability support for critical systems across India.">
+  <link rel="canonical" href="https://LevelMinds.com/database-administration.html">
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[
+    {"@type":"ListItem","position":1,"name":"Home","item":"https://LevelMinds.com/"},
+    {"@type":"ListItem","position":2,"name":"Services","item":"https://LevelMinds.com/services.html"},
+    {"@type":"ListItem","position":3,"name":"Database Administration","item":"https://LevelMinds.com/database-administration.html"}
+  ]}
+  </script>
+   <link rel="shortcut icon" href="assets/images/logo/logo.svg" type="image/x-icon">
+  <link rel="icon" href="assets/images/logo/logo.svg" type="image/x-icon">
+  // Standard Favicons
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/images/logo/logo.svg">
+  <link rel="icon" type="image/png" sizes="16x16" href="assets/images/logo/logo.svg">
+  // Apple Touch Icons
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/images/logo/logo.svg">
+  <link rel="apple-touch-icon" sizes="152x152" href="assets/images/logo/logo.svg">
+  <link rel="apple-touch-icon" sizes="120x120" href="assets/images/logo/logo.svg">
+  // Android & PWA
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/images/logo/logo.svg">
+  <link rel="icon" type="image/png" sizes="512x512" href="assets/images/logo/logo.svg">
+  <link rel="manifest" href="assets/images/logo/logo.svg">
+  // Microsoft Tiles
+  <meta name="msapplication-TileImage" content="assets/fav/mstile-144x144.png">
+  <meta name="msapplication-TileColor" content="#ffffff">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha512-iecdLmaskl7CVkqkXNQ/ZmK9OaBuEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo0+ynIRZBco0LQw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
+  <!-- SEO Meta Tags -->
+  <!-- Removed duplicate description and keywords for SEO compliance -->
+  <meta name="author" content="LevelMinds">
+  <meta name="robots" content="index, follow">
+
+  <!-- Open Graph Meta Tags -->
+  <meta property="og:title" content="Database Administration Services - LevelMinds">
+  <meta property="og:description"
+    content="Expert database administration, optimization, and security services from certified database professionals nationwide.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://LevelMinds.com/database-administration.html">
+
+  <!-- Canonical URL -->
+  <!-- Canonical updated above for SEO compliance -->
+
+  <!-- ======= Google Font =======-->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=Chakra+Petch:wght@300;400;500;600;700&amp;display=swap"
+    rel="stylesheet">
+
+  <!-- ======= Styles =======-->
+  <link href="assets/vendors/bootstrap/bootstrap.min.css" rel="stylesheet">
+  <link href="assets/vendors/bootstrap-icons/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="assets/css/style.css" rel="stylesheet">
+  <link href="assets/css/custom.css" rel="stylesheet">
+
+  <!-- ======= Custom Styles =======-->
+  <style>
+    .btn-light:hover {
+      background-color: transparent !important;
+      color: white !important;
+      border: 2px solid white !important;
+    }
+
+    .btn-outline-light:hover {
+      background-color: white !important;
+      color: #08503F !important;
+    }
+
+    .service-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 15px 30px rgba(0, 0, 0, 0.15) !important;
+      transition: all 0.3s ease;
+    }
+
+    .stats-card {
+      background: linear-gradient(135deg, rgba(8, 80, 63, 0.1) 0%, rgba(10, 103, 101, 0.1) 100%);
+      border-left: 4px solid #08503F;
+    }
+
+    .stats-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 10px 25px rgba(8, 80, 63, 0.2);
+    }
+
+    .database-visual {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
+      padding: 3rem;
+      backdrop-filter: blur(10px);
+    }
+
+    .data-flow {
+      width: 100%;
+      height: 4px;
+      background: linear-gradient(90deg, #08503F 0%, #0A6765 50%, #08503F 100%);
+      border-radius: 2px;
+      animation: dataFlow 3s infinite;
+    }
+
+    @keyframes dataFlow {
+
+      0%,
+      100% {
+        opacity: 0.5;
+      }
+
+      50% {
+        opacity: 1;
+      }
+    }
+
+    .pricing-card {
+      background: white;
+      border-radius: 20px;
+      padding: 2rem;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+      transition: all 0.3s ease;
+    }
+
+    .pricing-card:hover {
+      transform: translateY(-10px);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+    }
+
+    .pricing-card.featured {
+      background: linear-gradient(135deg, #08503F 0%, #0A6765 100%);
+      color: white;
+      transform: scale(1.05);
+    }
+
+    .tech-badge {
+      background: linear-gradient(135deg, #08503F 0%, #0A6765 100%);
+      color: white;
+      padding: 0.5rem 1rem;
+      border-radius: 25px;
+      font-size: 0.9rem;
+      margin: 0.25rem;
+      display: inline-block;
+    }
+
+    /* Mobile offcanvas height fix */
+    @media (max-width: 991.98px) {
+      .offcanvas {
+        height: auto !important;
+        max-height: 80vh !important;
+      }
+
+      .offcanvas-body {
+        flex-grow: 0 !important;
+      }
+    }
+  </style>
+</head>
+
+<body>
+                          <!-- ======= Header =======-->
+    <header class="fbs__net-navbar navbar navbar-expand-lg navbar-light" aria-label="LevelMinds navbar">
+      <div class="container d-flex align-items-center justify-content-between">
+        <a class="navbar-brand w-auto" href="index.html">
+          <img src="assets/images/logo/logo.svg" alt="LevelMinds" class="logo" height="40">
+        </a>
+
+        <div class="offcanvas offcanvas-start w-75" id="fbs__net-navbars" tabindex="-1" aria-labelledby="fbs__net-navbarsLabel">
+          <div class="offcanvas-header">
+            <div class="offcanvas-header-logo">
+              <a class="logo-link" id="fbs__net-navbarsLabel" href="index.html">
+                <img src="assets/images/logo/logo.svg" alt="LevelMinds" class="logo" height="35">
+              </a>
+            </div>
+            <button class="btn-close text-reset" type="button" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+          </div>
+
+          <div class="offcanvas-body align-items-lg-center">
+            <ul class="navbar-nav nav me-auto ps-lg-5 mb-2 mb-lg-0">
+              <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
+              <li class="nav-item"><a class="nav-link" href="team.html">Team</a></li>
+              <li class="nav-item"><a class="nav-link" href="tour.html">Tour</a></li>
+              <li class="nav-item"><a class="nav-link" href="blogs.php">Blogs</a></li>
+              <li class="nav-item"><a class="nav-link" href="career.html">Careers</a></li>
+              <li class="nav-item"><a class="nav-link" href="contact.html">Contact</a></li>
+            </ul>
+            <div class="d-lg-none mt-4 w-100">
+              <a class="btn btn-nav-outline w-100" href="https://www.lmap.in" target="_blank" rel="noopener">Login</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="d-flex align-items-center gap-3">
+          <div class="header-actions d-none d-lg-flex align-items-center gap-2">
+            <a class="btn btn-nav-outline" href="https://www.lmap.in" target="_blank" rel="noopener">Login</a>
+          </div>
+          <button class="fbs__net-navbar-toggler d-lg-none" type="button" data-bs-toggle="offcanvas" data-bs-target="#fbs__net-navbars" aria-controls="fbs__net-navbars" aria-label="Toggle navigation">
+            <svg class="fbs__net-icon-menu" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="21" x2="3" y1="6" y2="6"></line>
+              <line x1="21" x2="3" y1="12" y2="12"></line>
+              <line x1="21" x2="3" y1="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+    <!-- End Header-->
+    <!-- End Header-->
+    <!-- End Header-->
+    <!-- End Header-->
+    <!-- End Header--> <!-- 
+======= Main Content =======-->
+  <main>
+    <!-- ======= Hero Section =======-->
+    <section class="hero__v6 section"
+      style="background: linear-gradient(135deg, #08503F 0%, #0A6765 100%); padding: 120px 0 80px 0;">
+      <div class="container">
+        <div class="row align-items-center">
+          <div class="col-lg-7">
+            <h1 class="hero-title mb-4" style="color: white; font-size: 3.5rem; font-weight: bold; line-height: 1.2; padding-top: 60px;">
+              Expert Database Administration & Data Management
+            </h1>
+            <p class="hero-description mb-4" style="color: rgba(255,255,255,0.9); font-size: 1.3rem; line-height: 1.6;">
+              Secure, optimize, and manage your critical business data with certified database administrators and
+              cutting-edge solutions.
+            </p>
+
+            <!-- Database Technologies -->
+            <div class="mb-4" >
+              <p style="color: rgba(255,255,255,0.8); margin-bottom: 0.5rem;">Supported Technologies:</p>
+              <div class="d-flex flex-wrap gap-2">
+                <span class="tech-badge">MySQL</span>
+                <span class="tech-badge">PostgreSQL</span>
+                <span class="tech-badge">SQL Server</span>
+                <span class="tech-badge">Oracle</span>
+                <span class="tech-badge">MongoDB</span>
+                <span class="tech-badge">Redis</span>
+              </div>
+            </div>
+
+            <!-- <div class="hero-stats mb-5">
+              <div class="row">
+                <div class="col-4">
+                  <div class="stat-item text-center">
+                    <h3 style="color: white; font-size: 2.5rem; margin-bottom: 0;">99.99%</h3>
+                    <small style="color: white;">Data Availability</small>
+                  </div>
+                </div>
+                <div class="col-4">
+                  <div class="stat-item text-center">
+                    <h3 style="color: white; font-size: 2.5rem; margin-bottom: 0;">50%</h3>
+                    <small style="color: white;">Faster Queries</small>
+                  </div>
+                </div>
+                <div class="col-4">
+                  <div class="stat-item text-center">
+                    <h3 style="color: white; font-size: 2.5rem; margin-bottom: 0;">24/7</h3>
+                    <small style="color: white;">Monitoring</small>
+                  </div>
+                </div>
+              </div>
+            </div> -->
+
+            <div class="d-flex gap-3 flex-wrap">
+              <a href="index.html#register" class="btn btn-light btn-lg px-4 py-3">
+                <i class="bi bi-search me-2"></i>Find Database Experts
+              </a>
+              <a href="contact.html" class="btn btn-outline-light btn-lg px-4 py-3">
+                <i class="bi bi-graph-up me-2"></i>Free Performance Audit
+              </a>
+            </div>
+          </div>
+          <div class="col-lg-5">
+            <div class="hero-visual text-center">
+              <div class="database-visual">
+                <i class="bi bi-database"
+                  style="font-size: 6rem; color: white; margin-bottom: 2rem; display: block;"></i>
+                <div class="data-flow mb-3"></div>
+                <div class="d-flex justify-content-between align-items-center">
+                  <div class="text-center">
+                    <i class="bi bi-shield-check" style="font-size: 2rem; color: #28a745;"></i>
+                    <small style="color: rgba(255,255,255,0.8); display: block;">Secure</small>
+                  </div>
+                  <div class="text-center">
+                    <i class="bi bi-speedometer2" style="font-size: 2rem; color: #ffc107;"></i>
+                    <small style="color: rgba(255,255,255,0.8); display: block;">Optimized</small>
+                  </div>
+                  <div class="text-center">
+                    <i class="bi bi-cloud-check" style="font-size: 2rem; color: #17a2b8;"></i>
+                    <small style="color: rgba(255,255,255,0.8); display: block;">Backed Up</small>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======= Key Benefits Section =======-->
+    <section class="section" style="padding: 80px 0; background: #f8f9fa;">
+      <div class="container">
+        <div class="row mb-5">
+          <div class="col-lg-8 mx-auto text-center">
+            <h2 class="mb-4" style="font-family: 'Chakra Petch', sans-serif; color: #08503F;">Why Professional Database
+              Administration Matters</h2>
+            <p class="lead">Your data is your most valuable asset. Protect it with expert database management that
+              ensures performance, security, and reliability.</p>
+          </div>
+        </div>
+
+        <div class="row g-4">
+          <div class="col-lg-4 col-md-6">
+            <div class="stats-card p-4 rounded-3 h-100">
+              <div class="d-flex align-items-center mb-3">
+                <div class="icon-wrapper me-3"
+                  style="width: 50px; height: 50px; background: linear-gradient(135deg, #08503F 0%, #0A6765 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                  <i class="bi bi-lightning-charge" style="color: white; font-size: 1.5rem;"></i>
+                </div>
+                <h4 style="color: #08503F; margin: 0;">Peak Performance</h4>
+              </div>
+              <p class="mb-3">Optimize database performance with advanced tuning, indexing strategies, and query
+                optimization techniques.</p>
+              <ul class="list-unstyled">
+                <li><i class="bi bi-check-circle text-success me-2"></i>Query optimization & indexing</li>
+                <li><i class="bi bi-check-circle text-success me-2"></i>Performance monitoring & tuning</li>
+                <li><i class="bi bi-check-circle text-success me-2"></i>Resource allocation optimization</li>
+                <li><i class="bi bi-check-circle text-success me-2"></i>Bottleneck identification & resolution</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="col-lg-4 col-md-6">
+            <div class="stats-card p-4 rounded-3 h-100">
+              <div class="d-flex align-items-center mb-3">
+                <div class="icon-wrapper me-3"
+                  style="width: 50px; height: 50px; background: linear-gradient(135deg, #08503F 0%, #0A6765 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                  <i class="bi bi-shield-lock" style="color: white; font-size: 1.5rem;"></i>
+                </div>
+                <h4 style="color: #08503F; margin: 0;">Enterprise Security</h4>
+              </div>
+              <p class="mb-3">Implement comprehensive security measures to protect sensitive data and ensure regulatory
+                compliance.</p>
+              <ul class="list-unstyled">
+                <li><i class="bi bi-check-circle text-success me-2"></i>Data encryption & access control</li>
+                <li><i class="bi bi-check-circle text-success me-2"></i>Compliance management (GDPR, HIPAA)</li>
+                <li><i class="bi bi-check-circle text-success me-2"></i>Security auditing & monitoring</li>
+                <li><i class="bi bi-check-circle text-success me-2"></i>Vulnerability assessments</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="col-lg-4 col-md-6">
+            <div class="stats-card p-4 rounded-3 h-100">
+              <div class="d-flex align-items-center mb-3">
+                <div class="icon-wrapper me-3"
+                  style="width: 50px; height: 50px; background: linear-gradient(135deg, #08503F 0%, #0A6765 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                  <i class="bi bi-arrow-clockwise" style="color: white; font-size: 1.5rem;"></i>
+                </div>
+                <h4 style="color: #08503F; margin: 0;">Business Continuity</h4>
+              </div>
+              <p class="mb-3">Ensure your business never stops with robust backup strategies and disaster recovery
+                planning.</p>
+              <ul class="list-unstyled">
+                <li><i class="bi bi-check-circle text-success me-2"></i>Automated backup solutions</li>
+                <li><i class="bi bi-check-circle text-success me-2"></i>Disaster recovery planning</li>
+                <li><i class="bi bi-check-circle text-success me-2"></i>High availability configurations</li>
+                <li><i class="bi bi-check-circle text-success me-2"></i>Point-in-time recovery</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <!-- ======= Comprehensive Services Section =======-->
+    <section class="section" style="padding: 80px 0;">
+      <div class="container">
+        <div class="row mb-5">
+          <div class="col-lg-8 mx-auto text-center">
+            <h2 class="mb-4" style="font-family: 'Chakra Petch', sans-serif;">Complete Database Administration Services
+            </h2>
+            <p class="lead">From design to ongoing maintenance, we provide end-to-end database management solutions for
+              your business.</p>
+          </div>
+        </div>
+
+        <div class="row g-4">
+          <div class="col-lg-6 col-md-6">
+            <div class="service-card p-4 h-100" style="border: 2px solid #f0f0f0; border-radius: 15px;">
+              <div class="service-header d-flex align-items-center mb-3">
+                <div class="service-icon me-3"
+                  style="width: 60px; height: 60px; background: linear-gradient(135deg, #08503F 0%, #0A6765 100%); border-radius: 15px; display: flex; align-items: center; justify-content: center;">
+                  <i class="bi bi-diagram-3" style="font-size: 1.8rem; color: white;"></i>
+                </div>
+                <h4 class="mb-0" style="color: #08503F;">Database Design & Architecture</h4>
+              </div>
+              <p class="mb-3">Expert database design and architecture planning for optimal performance and scalability.
+              </p>
+              <ul class="list-unstyled">
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Schema design & normalization</li>
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Performance-optimized architecture</li>
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Scalability planning</li>
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Data modeling & relationships</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="col-lg-6 col-md-6">
+            <div class="service-card p-4 h-100" style="border: 2px solid #f0f0f0; border-radius: 15px;">
+              <div class="service-header d-flex align-items-center mb-3">
+                <div class="service-icon me-3"
+                  style="width: 60px; height: 60px; background: linear-gradient(135deg, #08503F 0%, #0A6765 100%); border-radius: 15px; display: flex; align-items: center; justify-content: center;">
+                  <i class="bi bi-speedometer" style="font-size: 1.8rem; color: white;"></i>
+                </div>
+                <h4 class="mb-0" style="color: #08503F;">Performance Optimization</h4>
+              </div>
+              <p class="mb-3">Advanced performance tuning to ensure your databases run at peak efficiency.</p>
+              <ul class="list-unstyled">
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Query optimization & analysis</li>
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Index strategy & management</li>
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Resource utilization tuning</li>
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Performance monitoring & alerts</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="col-lg-6 col-md-6">
+            <div class="service-card p-4 h-100" style="border: 2px solid #f0f0f0; border-radius: 15px;">
+              <div class="service-header d-flex align-items-center mb-3">
+                <div class="service-icon me-3"
+                  style="width: 60px; height: 60px; background: linear-gradient(135deg, #08503F 0%, #0A6765 100%); border-radius: 15px; display: flex; align-items: center; justify-content: center;">
+                  <i class="bi bi-shield-check" style="font-size: 1.8rem; color: white;"></i>
+                </div>
+                <h4 class="mb-0" style="color: #08503F;">Security & Compliance</h4>
+              </div>
+              <p class="mb-3">Comprehensive security implementation and compliance management for your data.</p>
+              <ul class="list-unstyled">
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Data encryption & access controls</li>
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>GDPR, HIPAA, SOX compliance</li>
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Security auditing & monitoring</li>
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>User privilege management</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="col-lg-6 col-md-6">
+            <div class="service-card p-4 h-100" style="border: 2px solid #f0f0f0; border-radius: 15px;">
+              <div class="service-header d-flex align-items-center mb-3">
+                <div class="service-icon me-3"
+                  style="width: 60px; height: 60px; background: linear-gradient(135deg, #08503F 0%, #0A6765 100%); border-radius: 15px; display: flex; align-items: center; justify-content: center;">
+                  <i class="bi bi-cloud-download" style="font-size: 1.8rem; color: white;"></i>
+                </div>
+                <h4 class="mb-0" style="color: #08503F;">Backup & Recovery Solutions</h4>
+              </div>
+              <p class="mb-3">Robust backup strategies and disaster recovery planning to protect your critical data.</p>
+              <ul class="list-unstyled">
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Automated backup scheduling</li>
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Point-in-time recovery</li>
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Disaster recovery testing</li>
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Cross-platform backup solutions</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="col-lg-6 col-md-6">
+            <div class="service-card p-4 h-100" style="border: 2px solid #f0f0f0; border-radius: 15px;">
+              <div class="service-header d-flex align-items-center mb-3">
+                <div class="service-icon me-3"
+                  style="width: 60px; height: 60px; background: linear-gradient(135deg, #08503F 0%, #0A6765 100%); border-radius: 15px; display: flex; align-items: center; justify-content: center;">
+                  <i class="bi bi-arrow-repeat" style="font-size: 1.8rem; color: white;"></i>
+                </div>
+                <h4 class="mb-0" style="color: #08503F;">Migration & Upgrades</h4>
+              </div>
+              <p class="mb-3">Seamless database migration and upgrade services with minimal downtime.</p>
+              <ul class="list-unstyled">
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Platform migration services</li>
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Version upgrade management</li>
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Data transformation & cleansing</li>
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Zero-downtime migrations</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="col-lg-6 col-md-6">
+            <div class="service-card p-4 h-100" style="border: 2px solid #f0f0f0; border-radius: 15px;">
+              <div class="service-header d-flex align-items-center mb-3">
+                <div class="service-icon me-3"
+                  style="width: 60px; height: 60px; background: linear-gradient(135deg, #08503F 0%, #0A6765 100%); border-radius: 15px; display: flex; align-items: center; justify-content: center;">
+                  <i class="bi bi-graph-up" style="font-size: 1.8rem; color: white;"></i>
+                </div>
+                <h4 class="mb-0" style="color: #08503F;">24/7 Monitoring & Support</h4>
+              </div>
+              <p class="mb-3">Round-the-clock database monitoring and expert support to ensure optimal performance.</p>
+              <ul class="list-unstyled">
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Real-time performance monitoring</li>
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Proactive issue detection</li>
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Expert technical support</li>
+                <li><i class="bi bi-arrow-right text-primary me-2"></i>Capacity planning & forecasting</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======= Database Technologies Section =======-->
+    <section class="section" style="padding: 80px 0; background: #f8f9fa;">
+      <div class="container">
+        <div class="row mb-5">
+          <div class="col-lg-8 mx-auto text-center">
+            <h2 class="mb-4" style="font-family: 'Chakra Petch', sans-serif;">Database Technologies We Master</h2>
+            <p class="lead">Our certified database administrators are experts in all major database platforms and
+              technologies.</p>
+          </div>
+        </div>
+
+        <div class="row g-4">
+          <div class="col-lg-4 col-md-6">
+            <div class="tech-card text-center p-4"
+              style="background: white; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); height: 100%;">
+              <div class="tech-icon mb-3"
+                style="width: 80px; height: 80px; background: linear-gradient(135deg, #08503F 0%, #0A6765 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto;">
+                <i class="bi bi-database" style="font-size: 2.5rem; color: white;"></i>
+              </div>
+              <h5 style="color: #08503F;">Relational Databases</h5>
+              <p class="mb-3">Expert management of traditional SQL databases for structured data.</p>
+              <div class="tech-list">
+                <span class="badge bg-light text-dark me-2 mb-2">MySQL</span>
+                <span class="badge bg-light text-dark me-2 mb-2">PostgreSQL</span>
+                <span class="badge bg-light text-dark me-2 mb-2">SQL Server</span>
+                <span class="badge bg-light text-dark me-2 mb-2">Oracle</span>
+                <span class="badge bg-light text-dark me-2 mb-2">MariaDB</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-lg-4 col-md-6">
+            <div class="tech-card text-center p-4"
+              style="background: white; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); height: 100%;">
+              <div class="tech-icon mb-3"
+                style="width: 80px; height: 80px; background: linear-gradient(135deg, #08503F 0%, #0A6765 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto;">
+                <i class="bi bi-diagram-2" style="font-size: 2.5rem; color: white;"></i>
+              </div>
+              <h5 style="color: #08503F;">NoSQL Databases</h5>
+              <p class="mb-3">Modern NoSQL solutions for flexible, scalable data management.</p>
+              <div class="tech-list">
+                <span class="badge bg-light text-dark me-2 mb-2">MongoDB</span>
+                <span class="badge bg-light text-dark me-2 mb-2">Cassandra</span>
+                <span class="badge bg-light text-dark me-2 mb-2">Redis</span>
+                <span class="badge bg-light text-dark me-2 mb-2">DynamoDB</span>
+                <span class="badge bg-light text-dark me-2 mb-2">CouchDB</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-lg-4 col-md-6">
+            <div class="tech-card text-center p-4"
+              style="background: white; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); height: 100%;">
+              <div class="tech-icon mb-3"
+                style="width: 80px; height: 80px; background: linear-gradient(135deg, #08503F 0%, #0A6765 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto;">
+                <i class="bi bi-cloud" style="font-size: 2.5rem; color: white;"></i>
+              </div>
+              <h5 style="color: #08503F;">Cloud Databases</h5>
+              <p class="mb-3">Cloud-native database solutions for modern, scalable applications.</p>
+              <div class="tech-list">
+                <span class="badge bg-light text-dark me-2 mb-2">AWS RDS</span>
+                <span class="badge bg-light text-dark me-2 mb-2">Azure SQL</span>
+                <span class="badge bg-light text-dark me-2 mb-2">Google Cloud SQL</span>
+                <span class="badge bg-light text-dark me-2 mb-2">Firebase</span>
+                <span class="badge bg-light text-dark me-2 mb-2">Snowflake</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <!-- ======= Pricing Section =======-->
+    <!-- <section class="section" style="padding: 80px 0;">
+      <div class="container">
+        <div class="row mb-5">
+          <div class="col-lg-8 mx-auto text-center">
+            <h2 class="mb-4" style="font-family: 'Chakra Petch', sans-serif;">Database Administration Packages</h2>
+            <p class="lead">Flexible pricing options to meet your database management needs and budget requirements.</p>
+          </div>
+        </div>
+
+        <div class="row g-4">
+          <div class="col-lg-4 col-md-6">
+            <div class="pricing-card text-center">
+              <div class="pricing-header mb-4">
+                <h4 style="color: #08503F;">Starter</h4>
+                <div class="price mb-2">
+                  <span style="font-size: 3rem; font-weight: bold; color: #08503F;">$399</span>
+                  <span class="text-muted">/month</span>
+                </div>
+                <p class="text-muted">Perfect for small databases</p>
+              </div>
+              <ul class="list-unstyled mb-4">
+                <li class="mb-2"><i class="bi bi-check-circle text-success me-2"></i>Basic monitoring & maintenance</li>
+                <li class="mb-2"><i class="bi bi-check-circle text-success me-2"></i>Weekly performance reports</li>
+                <li class="mb-2"><i class="bi bi-check-circle text-success me-2"></i>Security updates & patches</li>
+                <li class="mb-2"><i class="bi bi-check-circle text-success me-2"></i>Email support (business hours)</li>
+                <li class="mb-2"><i class="bi bi-check-circle text-success me-2"></i>Basic backup management</li>
+                <li class="mb-2"><i class="bi bi-check-circle text-success me-2"></i>Up to 2 databases</li>
+              </ul>
+              <a href="contact.html" class="btn btn-outline-primary w-100">Get Started</a>
+            </div>
+          </div>
+
+          <div class="col-lg-4 col-md-6">
+            <div class="pricing-card featured text-center">
+              <div class="badge bg-warning text-dark mb-3">Most Popular</div>
+              <div class="pricing-header mb-4">
+                <h4 class="text-white">Professional</h4>
+                <div class="price mb-2">
+                  <span style="font-size: 3rem; font-weight: bold;" class="text-white">$799</span>
+                  <span style="opacity: 0.8;" class="text-white">/month</span>
+                </div>
+                <p style="opacity: 0.8;" class="text-white">Ideal for growing businesses</p>
+              </div>
+              <ul class="list-unstyled mb-4 text-white">
+                <li class="mb-2"><i class="bi bi-check-circle me-2"></i>24/7 monitoring & alerts</li>
+                <li class="mb-2"><i class="bi bi-check-circle me-2"></i>Performance optimization</li>
+                <li class="mb-2"><i class="bi bi-check-circle me-2"></i>Advanced security management</li>
+                <li class="mb-2"><i class="bi bi-check-circle me-2"></i>Phone & email support</li>
+                <li class="mb-2"><i class="bi bi-check-circle me-2"></i>Automated backup & recovery</li>
+                <li class="mb-2"><i class="bi bi-check-circle me-2"></i>Up to 10 databases</li>
+                <li class="mb-2"><i class="bi bi-check-circle me-2"></i>Monthly health reports</li>
+              </ul>
+              <a href="contact.html" class="btn btn-light w-100">Get Started</a>
+            </div>
+          </div>
+
+          <div class="col-lg-4 col-md-6">
+            <div class="pricing-card text-center">
+              <div class="pricing-header mb-4">
+                <h4 style="color: #08503F;">Enterprise</h4>
+                <div class="price mb-2">
+                  <span style="font-size: 3rem; font-weight: bold; color: #08503F;">$1,499</span>
+                  <span class="text-muted">/month</span>
+                </div>
+                <p class="text-muted">For large-scale operations</p>
+              </div>
+              <ul class="list-unstyled mb-4">
+                <li class="mb-2"><i class="bi bi-check-circle text-success me-2"></i>24/7 monitoring & support</li>
+                <li class="mb-2"><i class="bi bi-check-circle text-success me-2"></i>Advanced performance tuning</li>
+                <li class="mb-2"><i class="bi bi-check-circle text-success me-2"></i>Enterprise security & compliance</li>
+                <li class="mb-2"><i class="bi bi-check-circle text-success me-2"></i>Dedicated DBA team</li>
+                <li class="mb-2"><i class="bi bi-check-circle text-success me-2"></i>Real-time backup & DR</li>
+                <li class="mb-2"><i class="bi bi-check-circle text-success me-2"></i>Unlimited databases</li>
+                <li class="mb-2"><i class="bi bi-check-circle text-success me-2"></i>Custom solutions & consulting</li>
+                <li class="mb-2"><i class="bi bi-check-circle text-success me-2"></i>SLA guarantee (99.99%)</li>
+              </ul>
+              <a href="contact.html" class="btn btn-outline-primary w-100">Contact Sales</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="row mt-5">
+          <div class="col-12 text-center">
+            <p class="text-muted">All packages include free database assessment and migration assistance. Custom enterprise solutions available.</p>
+          </div>
+        </div>
+      </div>
+    </section> -->
+
+    <!-- ======= Industries & Use Cases Section =======-->
+    <section class="section" style="padding: 80px 0; background: #f8f9fa;">
+      <div class="container">
+        <div class="row mb-5">
+          <div class="col-lg-8 mx-auto text-center">
+            <h2 class="mb-4" style="font-family: 'Chakra Petch', sans-serif;">Industries & Use Cases</h2>
+            <p class="lead">Specialized database solutions tailored to industry-specific requirements and compliance
+              needs.</p>
+          </div>
+        </div>
+
+        <div class="row g-4">
+          <div class="col-lg-3 col-md-6">
+            <div class="industry-card text-center p-4"
+              style="background: white; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); height: 100%;">
+              <i class="bi bi-hospital" style="font-size: 3rem; color: #08503F; margin-bottom: 1rem;"></i>
+              <h5 style="color: #08503F;">Healthcare & Medical</h5>
+              <p>HIPAA-compliant database management for patient records, medical imaging, and healthcare analytics with
+                enhanced security protocols.</p>
+              <div class="mt-3">
+                <span class="badge bg-light text-dark me-1 mb-1">HIPAA</span>
+                <span class="badge bg-light text-dark me-1 mb-1">HL7</span>
+                <span class="badge bg-light text-dark me-1 mb-1">FHIR</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-lg-3 col-md-6">
+            <div class="industry-card text-center p-4"
+              style="background: white; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); height: 100%;">
+              <i class="bi bi-bank" style="font-size: 3rem; color: #08503F; margin-bottom: 1rem;"></i>
+              <h5 style="color: #08503F;">Financial Services</h5>
+              <p>High-security database solutions for banking, insurance, and fintech with regulatory compliance and
+                fraud detection capabilities.</p>
+              <div class="mt-3">
+                <span class="badge bg-light text-dark me-1 mb-1">PCI DSS</span>
+                <span class="badge bg-light text-dark me-1 mb-1">SOX</span>
+                <span class="badge bg-light text-dark me-1 mb-1">GDPR</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-lg-3 col-md-6">
+            <div class="industry-card text-center p-4"
+              style="background: white; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); height: 100%;">
+              <i class="bi bi-cart" style="font-size: 3rem; color: #08503F; margin-bottom: 1rem;"></i>
+              <h5 style="color: #08503F;">E-commerce & Retail</h5>
+              <p>Scalable database solutions for online stores, inventory management, customer analytics, and real-time
+                transaction processing.</p>
+              <div class="mt-3">
+                <span class="badge bg-light text-dark me-1 mb-1">High Traffic</span>
+                <span class="badge bg-light text-dark me-1 mb-1">Real-time</span>
+                <span class="badge bg-light text-dark me-1 mb-1">Analytics</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-lg-3 col-md-6">
+            <div class="industry-card text-center p-4"
+              style="background: white; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); height: 100%;">
+              <i class="bi bi-building" style="font-size: 3rem; color: #08503F; margin-bottom: 1rem;"></i>
+              <h5 style="color: #08503F;">Enterprise & SaaS</h5>
+              <p>Enterprise-grade database architecture for SaaS platforms, multi-tenant applications, and large-scale
+                business operations.</p>
+              <div class="mt-3">
+                <span class="badge bg-light text-dark me-1 mb-1">Multi-tenant</span>
+                <span class="badge bg-light text-dark me-1 mb-1">Scalable</span>
+                <span class="badge bg-light text-dark me-1 mb-1">Cloud-native</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======= CTA Section =======-->
+    <section class="section" style="background: linear-gradient(135deg, #08503F 0%, #0A6765 100%); padding: 80px 0;">
+      <div class="container">
+        <div class="row">
+          <div class="col-lg-8 mx-auto text-center">
+            <h2 class="text-white mb-4">Ready to Optimize Your Database Performance?</h2>
+            <p class="text-white mb-5" style="opacity: 0.9; font-size: 1.2rem;">Get a free database performance audit
+              and connect with certified database administrators who can transform your data infrastructure.</p>
+            <div class="d-flex gap-3 justify-content-center flex-wrap">
+              <a href="index.html#register" class="btn btn-light btn-lg px-5 py-3">
+                <i class="bi bi-search me-2"></i>Find Database Experts
+              </a>
+              <a href="contact.html" class="btn btn-outline-light btn-lg px-5 py-3">
+                <i class="bi bi-graph-up me-2"></i>Free Performance Audit
+              </a>
+            </div>
+            <div class="mt-4">
+              <small class="text-white" style="opacity: 0.8;">
+                <i class="bi bi-shield-check me-1"></i>Free consultation â€¢ Performance guarantee â€¢ 24/7 expert support
+              </small>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <!-- ======= Footer =======-->
+      <div data-global-footer></div>
+
+  <!-- ======= Scripts =======-->
+  <script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
+  <script src="assets/js/footer.js"></script>
+</body>
+
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

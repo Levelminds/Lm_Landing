@@ -1,0 +1,121 @@
+﻿/* Theme adjustments */
+.hero__v6 {
+  background: linear-gradient(180deg, #FFFFFF 0%, #F5F8FE 100%);
+  color: #0F1D3B;
+}
+.hero__v6 .hero-title,
+.hero__v6 .hero-description {
+  color: #0F1D3B;
+}
+.hero__v6 .hero-description {
+  color: rgba(15, 29, 59, 0.72);
+}
+.hero__v6 .btn {
+  box-shadow: 0 12px 30px rgba(15, 29, 59, 0.12);
+}
+
+.career-hero {
+  background: linear-gradient(135deg, #F9FBFF 0%, #EAF3FF 100%);
+  color: #0F1D3B;
+  padding: 190px 0 140px;
+  position: relative;
+  overflow: hidden;
+}
+.career-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: url('assets/images/texture-grid.svg') center/cover repeat;
+  opacity: 0.05;
+}
+.career-hero h1 {
+  color: #0F1D3B;
+  font-weight: 800;
+}
+.career-hero .badge-soft {
+  background: rgba(60, 141, 255, 0.18);
+  color: #3C8DFF;
+}
+
+footer.footer,
+[data-global-footer] footer {
+  background: #F5F8FE;
+  color: #0F1D3B;
+  border-top: 1px solid rgba(7, 27, 54, 0.08);
+}
+footer.footer a,
+footer.footer p,
+footer.footer small,
+footer.footer span,
+[data-global-footer] footer a,
+[data-global-footer] footer p,
+[data-global-footer] footer small,
+[data-global-footer] footer span {
+  color: rgba(15, 29, 59, 0.78);
+}
+footer.footer a:hover,
+[data-global-footer] footer a:hover {
+  color: #0F1D3B;
+}
+
+.team-card .btn-outline-primary {
+  background-color: #EEF4FF;
+  border-color: #3C8DFF;
+  color: #0F1D3B;
+  transition: all 0.2s ease;
+}
+.team-card .btn-outline-primary:hover {
+  background-color: #3C8DFF;
+  color: #ffffff;
+}
+
+
+/* Navbar consistency */
+.fbs__net-navbar,
+.fbs__net-navbars.offcanvas,
+.fbs__net-navbars .offcanvas-header,
+.fbs__net-navbar .offcanvas-body {
+  background-color: #ffffff !important;
+}
+.fbs__net-navbar .nav-link {
+  color: #0F1D3B !important;
+}
+.fbs__net-navbar .nav-link.active,
+.fbs__net-navbar .nav-link:hover {
+  color: #3C8DFF !important;
+}
+.fbs__net-navbar .btn-nav-primary {
+  display: none !important;
+}
+
+/* LinkedIn button refinement */
+.team-card .btn-outline-primary {
+  background: #F2F7FF;
+  border-color: rgba(60, 141, 255, 0.35);
+  color: #1B2A4B;
+  font-weight: 600;
+}
+.team-card .btn-outline-primary i {
+  color: #3C8DFF;
+}
+.team-card .btn-outline-primary:hover {
+  background: #3C8DFF;
+  border-color: #3C8DFF;
+  color: #ffffff;
+}
+.team-card .btn-outline-primary:hover i {
+  color: #ffffff;
+}
+
+
+.hero__v6 .btn-light {
+  background-color: #ffffff;
+  border: 2px solid #3C8DFF;
+  color: #0F1D3B;
+}
+.hero__v6 .btn-light:hover {
+  background-color: #3C8DFF;
+  color: #ffffff;
+  border-color: #3C8DFF;
+}
+

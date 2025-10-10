@@ -1,0 +1,49 @@
+/* --- Text color: enforce black in cards and modal --- */
+
+/* Card/list excerpts and featured excerpts */
+.post-summary,
+.blog-excerpt,
+.blog-summary,
+.lead,
+[data-post-summary] {
+  color: #000 !important;
+}
+
+/* Critical: modal summary + modal content (and all descendants) */
+#postModal [data-post-summary],
+#postModal [data-post-summary] *,
+#postModal [data-post-content],
+#postModal [data-post-content] * {
+  color: #000 !important;
+}
+
+/* Some templates put .text-secondary on modal content; override */
+#postModal .text-secondary,
+#postModal .text-secondary * {
+  color: #000 !important;
+}
+
+/* --- Like button styling (card + modal) --- */
+.btn-like {
+  border: 1px solid #3b82f6;
+  color: #1f2937;
+  background: #f9fafb;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  transition: all .2s ease;
+  font-size: 0.95rem;
+}
+.btn-like:hover { background: #eff6ff; }
+.btn-like.liked {
+  background: #3b82f6;
+  color: #fff;
+  border-color: #3b82f6;
+}
+.btn-like .bi { font-size: 1rem; }
+
+/* Hide any old "X likes" label you may have left in the modal */
+#postModal [data-post-likes] { display: none !important; }
