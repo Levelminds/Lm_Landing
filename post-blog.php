@@ -20,9 +20,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $content = trim($_POST['content'] ?? '');
     $mediaType = $_POST['media_type'] ?? 'photo';
     $mediaUrl = trim($_POST['media_url'] ?? '');
+    $category = $_POST['category'] ?? 'general';
     $views = max(0, (int)($_POST['views'] ?? 0));
     $likes = max(0, (int)($_POST['likes'] ?? 0));
     $responses = max(0, (int)($_POST['responses'] ?? 0));
+
+    $allowedCategories = ['teachers', 'schools', 'general'];
+    if (!in_array($category, $allowedCategories, true)) {
+        $category = 'general';
+    }
 
     if ($title === '' || $summary === '' || $content === '') {
         $error = 'Please fill in the required fields (title, summary, and content).';
@@ -67,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 ]);
 
-                $stmt = $pdo->prepare('INSERT INTO blog_posts (title, author, summary, content, media_type, media_url, views, likes, responses) VALUES (:title, :author, :summary, :content, :media_type, :media_url, :views, :likes, :responses)');
+                $stmt = $pdo->prepare('INSERT INTO blog_posts (title, author, summary, content, media_type, media_url, category, views, likes, responses) VALUES (:title, :author, :summary, :content, :media_type, :media_url, :category, :views, :likes, :responses)');
                 $stmt->execute([
                     'title' => $title,
                     'author' => $author,
@@ -75,6 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'content' => $content,
                     'media_type' => $mediaType,
                     'media_url' => $mediaUrl,
+                    'category' => $category,
                     'views' => $views,
                     'likes' => $likes,
                     'responses' => $responses,
@@ -133,11 +140,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           <label class="form-label fw-semibold">Title *</label>
           <input type="text" name="title" class="form-control" required>
         </div>
-        <div class="col-md-6">
+        <div class="col-md-4">
           <label class="form-label fw-semibold">Author</label>
           <input type="text" name="author" class="form-control" placeholder="LevelMinds Team">
         </div>
-        <div class="col-md-6">
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Audience Category *</label>
+          <select name="category" class="form-select" required>
+            <option value="teachers">For Teachers</option>
+            <option value="schools">For Schools</option>
+            <option value="general" selected>General Insights</option>
+          </select>
+        </div>
+        <div class="col-md-4">
           <label class="form-label fw-semibold">Blog Type *</label>
           <select name="media_type" class="form-select" required>
             <option value="photo">Photo Blog</option>
@@ -156,11 +171,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Short Summary *</label>
-          <textarea name="summary" class="form-control" rows="2" required></textarea>
+          <textarea name="summary" class="form-control js-rich-editor" rows="2" required></textarea>
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Main Content *</label>
-          <textarea name="content" class="form-control" rows="8" required></textarea>
+          <textarea name="content" class="form-control js-rich-editor" rows="8" required></textarea>
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Initial Views</label>
@@ -184,5 +199,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <div data-global-footer></div>
   <script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
   <script src="assets/js/footer.js"></script>
+  <script src="https://cdn.tiny.cloud/1/no-api-key/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      if (typeof tinymce === 'undefined') {
+        return;
+      }
+
+      tinymce.init({
+        selector: 'textarea.js-rich-editor',
+        menubar: false,
+        branding: false,
+        plugins: 'lists link table image media code fullscreen autoresize',
+        toolbar: 'undo redo | blocks | bold italic underline | alignleft aligncenter alignright alignjustify | bullist numlist | link table | removeformat | code fullscreen',
+        min_height: 220,
+        autoresize_bottom_margin: 16,
+        convert_urls: false,
+        setup: (editor) => {
+          editor.on('change keyup setcontent', () => {
+            editor.save();
+          });
+        }
+      });
+
+      document.querySelectorAll('form').forEach((form) => {
+        form.addEventListener('submit', () => {
+          if (typeof tinymce !== 'undefined') {
+            tinymce.triggerSave();
+          }
+        });
+      });
+    });
+  </script>
 </body>
 </html>
