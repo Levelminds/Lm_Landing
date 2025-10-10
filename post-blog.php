@@ -12,6 +12,32 @@ $password = 'Levelminds@2024';
 
 $message = null;
 $error = null;
+$hasCategoryColumn = null;
+
+function ensureBlogCategoryColumn(PDO $pdo)
+{
+    try {
+        $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
+        if ($check && $check->fetch()) {
+            return true;
+        }
+
+        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
+        return true;
+    } catch (PDOException $e) {
+        return false;
+    }
+}
+
+try {
+    $pdoSchema = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    ]);
+    $hasCategoryColumn = ensureBlogCategoryColumn($pdoSchema);
+    $pdoSchema = null;
+} catch (PDOException $e) {
+    $hasCategoryColumn = false;
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $title = trim($_POST['title'] ?? '');
@@ -85,7 +111,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'views' => $views,
                     'likes' => $likes,
                     'responses' => $responses,
-                ]);
+                ];
+
+                if ($hasCategoryColumn) {
+                    $columns = 'title, author, summary, content, media_type, media_url, category, views, likes, responses';
+                    $placeholders = ':title, :author, :summary, :content, :media_type, :media_url, :category, :views, :likes, :responses';
+                    $params['category'] = $category;
+                }
+
+                $stmt = $pdo->prepare("INSERT INTO blog_posts ($columns) VALUES ($placeholders)");
+                $stmt->execute($params);
                 $message = 'Blog post saved successfully.';
             } catch (PDOException $e) {
                 $error = 'Database error: ' . htmlspecialchars($e->getMessage());

@@ -18,15 +18,37 @@ if ($id <= 0) {
 
 $message = '';
 $error = '';
+$hasCategoryColumn = false;
+
+function ensureBlogCategoryColumn(PDO $pdo)
+{
+    try {
+        $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
+        if ($check && $check->fetch()) {
+            return true;
+        }
+
+        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
+        return true;
+    } catch (PDOException $e) {
+        return false;
+    }
+}
 
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     ]);
 
+    $hasCategoryColumn = ensureBlogCategoryColumn($pdo);
+
     $stmt = $pdo->prepare('SELECT * FROM blog_posts WHERE id = :id LIMIT 1');
     $stmt->execute(['id' => $id]);
     $post = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($post && !$hasCategoryColumn && !isset($post['category'])) {
+        $post['category'] = 'general';
+    }
 
     if (!$post) {
         header('Location: blogs-manage.php');
@@ -103,7 +125,15 @@ try {
                     'likes' => $likes,
                     'responses' => $responses,
                     'id' => $id,
-                ]);
+                ];
+
+                if ($hasCategoryColumn) {
+                    $sql = 'UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, category = :category, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id';
+                    $params['category'] = $category;
+                }
+
+                $update = $pdo->prepare($sql);
+                $update->execute($params);
 
                 $stmt->execute(['id' => $id]);
                 $post = $stmt->fetch(PDO::FETCH_ASSOC);
