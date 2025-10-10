@@ -12,6 +12,32 @@ $password = 'Levelminds@2024';
 
 $message = null;
 $error = null;
+$hasCategoryColumn = null;
+
+function ensureBlogCategoryColumn(PDO $pdo)
+{
+    try {
+        $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
+        if ($check && $check->fetch()) {
+            return true;
+        }
+
+        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
+        return true;
+    } catch (PDOException $e) {
+        return false;
+    }
+}
+
+try {
+    $pdoSchema = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    ]);
+    $hasCategoryColumn = ensureBlogCategoryColumn($pdoSchema);
+    $pdoSchema = null;
+} catch (PDOException $e) {
+    $hasCategoryColumn = false;
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $title = trim($_POST['title'] ?? '');
@@ -20,9 +46,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $content = trim($_POST['content'] ?? '');
     $mediaType = $_POST['media_type'] ?? 'photo';
     $mediaUrl = trim($_POST['media_url'] ?? '');
+    $category = $_POST['category'] ?? 'general';
     $views = max(0, (int)($_POST['views'] ?? 0));
     $likes = max(0, (int)($_POST['likes'] ?? 0));
     $responses = max(0, (int)($_POST['responses'] ?? 0));
+
+    $allowedCategories = ['teachers', 'schools', 'general'];
+    if (!in_array($category, $allowedCategories, true)) {
+        $category = 'general';
+    }
 
     if ($title === '' || $summary === '' || $content === '') {
         $error = 'Please fill in the required fields (title, summary, and content).';
@@ -67,8 +99,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 ]);
 
-                $stmt = $pdo->prepare('INSERT INTO blog_posts (title, author, summary, content, media_type, media_url, views, likes, responses) VALUES (:title, :author, :summary, :content, :media_type, :media_url, :views, :likes, :responses)');
-                $stmt->execute([
+                $hasCategoryColumn = ensureBlogCategoryColumn($pdo);
+                $columns = 'title, author, summary, content, media_type, media_url, views, likes, responses';
+                $placeholders = ':title, :author, :summary, :content, :media_type, :media_url, :views, :likes, :responses';
+                $params = [
                     'title' => $title,
                     'author' => $author,
                     'summary' => $summary,
@@ -78,7 +112,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'views' => $views,
                     'likes' => $likes,
                     'responses' => $responses,
-                ]);
+                ];
+
+                if ($hasCategoryColumn) {
+                    $columns = 'title, author, summary, content, media_type, media_url, category, views, likes, responses';
+                    $placeholders = ':title, :author, :summary, :content, :media_type, :media_url, :category, :views, :likes, :responses';
+                    $params['category'] = $category;
+                }
+
+                $stmt = $pdo->prepare("INSERT INTO blog_posts ($columns) VALUES ($placeholders)");
+                $stmt->execute($params);
                 $message = 'Blog post saved successfully.';
             } catch (PDOException $e) {
                 $error = 'Database error: ' . htmlspecialchars($e->getMessage());
@@ -133,11 +176,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           <label class="form-label fw-semibold">Title *</label>
           <input type="text" name="title" class="form-control" required>
         </div>
-        <div class="col-md-6">
+        <div class="col-md-4">
           <label class="form-label fw-semibold">Author</label>
           <input type="text" name="author" class="form-control" placeholder="LevelMinds Team">
         </div>
-        <div class="col-md-6">
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Audience Category *</label>
+          <?php if ($hasCategoryColumn): ?>
+          <select name="category" class="form-select" required>
+            <option value="teachers">For Teachers</option>
+            <option value="schools">For Schools</option>
+            <option value="general" selected>General Insights</option>
+          </select>
+          <?php else: ?>
+          <input type="hidden" name="category" value="general">
+          <div class="form-text text-muted">Categories will default to General until the database is updated.</div>
+          <?php endif; ?>
+        </div>
+        <div class="col-md-4">
           <label class="form-label fw-semibold">Blog Type *</label>
           <select name="media_type" class="form-select" required>
             <option value="photo">Photo Blog</option>
@@ -156,11 +212,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Short Summary *</label>
-          <textarea name="summary" class="form-control" rows="2" required></textarea>
+          <textarea name="summary" class="form-control js-rich-editor" rows="2" required></textarea>
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Main Content *</label>
-          <textarea name="content" class="form-control" rows="8" required></textarea>
+          <textarea name="content" class="form-control js-rich-editor" rows="8" required></textarea>
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Initial Views</label>
@@ -184,5 +240,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <div data-global-footer></div>
   <script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
   <script src="assets/js/footer.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tinymce@6.7.0/tinymce.min.js" referrerpolicy="origin"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      if (typeof tinymce === 'undefined') {
+        return;
+      }
+
+      tinymce.init({
+        selector: 'textarea.js-rich-editor',
+        menubar: false,
+        branding: false,
+        plugins: 'lists link table image media code fullscreen autoresize',
+        toolbar: 'undo redo | blocks | bold italic underline | alignleft aligncenter alignright alignjustify | bullist numlist | link table | removeformat | code fullscreen',
+        min_height: 220,
+        autoresize_bottom_margin: 16,
+        convert_urls: false,
+        setup: (editor) => {
+          editor.on('change keyup setcontent', () => {
+            editor.save();
+          });
+        }
+      });
+
+      document.querySelectorAll('form').forEach((form) => {
+        form.addEventListener('submit', () => {
+          if (typeof tinymce !== 'undefined') {
+            tinymce.triggerSave();
+          }
+        });
+      });
+    });
+  </script>
 </body>
 </html>

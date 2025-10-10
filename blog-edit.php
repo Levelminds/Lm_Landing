@@ -18,15 +18,37 @@ if ($id <= 0) {
 
 $message = '';
 $error = '';
+$hasCategoryColumn = false;
+
+function ensureBlogCategoryColumn(PDO $pdo)
+{
+    try {
+        $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
+        if ($check && $check->fetch()) {
+            return true;
+        }
+
+        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
+        return true;
+    } catch (PDOException $e) {
+        return false;
+    }
+}
 
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     ]);
 
+    $hasCategoryColumn = ensureBlogCategoryColumn($pdo);
+
     $stmt = $pdo->prepare('SELECT * FROM blog_posts WHERE id = :id LIMIT 1');
     $stmt->execute(['id' => $id]);
     $post = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($post && !$hasCategoryColumn && !isset($post['category'])) {
+        $post['category'] = 'general';
+    }
 
     if (!$post) {
         header('Location: blogs-manage.php');
@@ -41,9 +63,19 @@ try {
         $mediaType = $_POST['media_type'] ?? 'photo';
         $mediaUrl = trim($_POST['media_url'] ?? '');
         $status = $_POST['status'] ?? 'published';
+        $category = $_POST['category'] ?? ($post['category'] ?? 'general');
         $views = max(0, (int)($_POST['views'] ?? $post['views']));
         $likes = max(0, (int)($_POST['likes'] ?? $post['likes']));
         $responses = max(0, (int)($_POST['responses'] ?? $post['responses']));
+
+        if ($hasCategoryColumn) {
+            $allowedCategories = ['teachers', 'schools', 'general'];
+            if (!in_array($category, $allowedCategories, true)) {
+                $category = 'general';
+            }
+        } else {
+            $category = 'general';
+        }
 
         if ($title === '' || $summary === '' || $content === '') {
             $error = 'Please fill in the required fields (title, summary, and content).';
@@ -83,8 +115,8 @@ try {
             }
 
             if (!$error) {
-                $update = $pdo->prepare('UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id');
-                $update->execute([
+                $sql = 'UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id';
+                $params = [
                     'title' => $title,
                     'author' => $author,
                     'summary' => $summary,
@@ -96,7 +128,15 @@ try {
                     'likes' => $likes,
                     'responses' => $responses,
                     'id' => $id,
-                ]);
+                ];
+
+                if ($hasCategoryColumn) {
+                    $sql = 'UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, category = :category, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id';
+                    $params['category'] = $category;
+                }
+
+                $update = $pdo->prepare($sql);
+                $update->execute($params);
 
                 $stmt->execute(['id' => $id]);
                 $post = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -152,9 +192,23 @@ try {
           <label class="form-label fw-semibold">Title *</label>
           <input type="text" name="title" class="form-control" value="<?php echo htmlspecialchars($post['title']); ?>" required>
         </div>
-        <div class="col-md-6">
+        <div class="col-md-3">
           <label class="form-label fw-semibold">Author</label>
           <input type="text" name="author" class="form-control" value="<?php echo htmlspecialchars($post['author']); ?>">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Audience Category *</label>
+          <?php $currentCategory = $post['category'] ?? 'general'; ?>
+          <?php if ($hasCategoryColumn): ?>
+          <select name="category" class="form-select" required>
+            <option value="teachers" <?php echo $currentCategory === 'teachers' ? 'selected' : ''; ?>>For Teachers</option>
+            <option value="schools" <?php echo $currentCategory === 'schools' ? 'selected' : ''; ?>>For Schools</option>
+            <option value="general" <?php echo $currentCategory === 'general' ? 'selected' : ''; ?>>General Insights</option>
+          </select>
+          <?php else: ?>
+          <input type="hidden" name="category" value="general">
+          <div class="form-text text-muted">Categories will default to General until the database is updated.</div>
+          <?php endif; ?>
         </div>
         <div class="col-md-3">
           <label class="form-label fw-semibold">Blog Type *</label>
@@ -198,11 +252,11 @@ try {
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Short Summary *</label>
-          <textarea name="summary" class="form-control" rows="2" required><?php echo htmlspecialchars($post['summary']); ?></textarea>
+          <textarea name="summary" class="form-control js-rich-editor" rows="2" required><?php echo htmlspecialchars_decode($post['summary'] ?? '', ENT_QUOTES); ?></textarea>
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Main Content *</label>
-          <textarea name="content" class="form-control" rows="8" required><?php echo htmlspecialchars($post['content']); ?></textarea>
+          <textarea name="content" class="form-control js-rich-editor" rows="8" required><?php echo htmlspecialchars_decode($post['content'] ?? '', ENT_QUOTES); ?></textarea>
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Views</label>
@@ -227,6 +281,38 @@ try {
   <div data-global-footer></div>
   <script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
   <script src="assets/js/footer.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tinymce@6.7.0/tinymce.min.js" referrerpolicy="origin"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      if (typeof tinymce === 'undefined') {
+        return;
+      }
+
+      tinymce.init({
+        selector: 'textarea.js-rich-editor',
+        menubar: false,
+        branding: false,
+        plugins: 'lists link table image media code fullscreen autoresize',
+        toolbar: 'undo redo | blocks | bold italic underline | alignleft aligncenter alignright alignjustify | bullist numlist | link table | removeformat | code fullscreen',
+        min_height: 220,
+        autoresize_bottom_margin: 16,
+        convert_urls: false,
+        setup: (editor) => {
+          editor.on('change keyup setcontent', () => {
+            editor.save();
+          });
+        }
+      });
+
+      document.querySelectorAll('form').forEach((form) => {
+        form.addEventListener('submit', () => {
+          if (typeof tinymce !== 'undefined') {
+            tinymce.triggerSave();
+          }
+        });
+      });
+    });
+  </script>
 </body>
 </html>
 

@@ -13,6 +13,27 @@ $password = 'Levelminds@2024';
 $message = '';
 $error = '';
 $posts = [];
+$hasCategoryColumn = false;
+$audienceLabels = [
+    'teachers' => 'For Teachers',
+    'schools'  => 'For Schools',
+    'general'  => 'General'
+];
+
+function ensureBlogCategoryColumn(PDO $pdo)
+{
+    try {
+        $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
+        if ($check && $check->fetch()) {
+            return true;
+        }
+
+        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
+        return true;
+    } catch (PDOException $e) {
+        return false;
+    }
+}
 
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
@@ -26,7 +47,12 @@ try {
         $message = 'Blog post deleted.';
     }
 
-    $postsStmt = $pdo->query('SELECT id, title, author, media_type, status, created_at, views, likes FROM blog_posts ORDER BY created_at DESC');
+    $hasCategoryColumn = ensureBlogCategoryColumn($pdo);
+    $columns = 'id, title, author, media_type, status, created_at, views, likes';
+    if ($hasCategoryColumn) {
+        $columns .= ', category';
+    }
+    $postsStmt = $pdo->query("SELECT $columns FROM blog_posts ORDER BY created_at DESC");
     $posts = $postsStmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     $error = 'Database error: ' . htmlspecialchars($e->getMessage());
@@ -84,6 +110,7 @@ try {
               <tr>
                 <th scope="col">Title</th>
                 <th scope="col">Type</th>
+                <th scope="col">Audience</th>
                 <th scope="col">Status</th>
                 <th scope="col">Views</th>
                 <th scope="col">Likes</th>
@@ -99,6 +126,11 @@ try {
                   <small class="text-muted">By <?php echo htmlspecialchars($post['author']); ?></small>
                 </td>
                 <td><span class="badge bg-<?php echo $post['media_type'] === 'video' ? 'info' : 'secondary'; ?>"><?php echo ucfirst($post['media_type']); ?></span></td>
+                <td><?php
+                  $categoryKey = $hasCategoryColumn ? ($post['category'] ?? 'general') : 'general';
+                  $label = $audienceLabels[$categoryKey] ?? ucfirst($categoryKey);
+                  echo htmlspecialchars($label);
+                ?></td>
                 <td><span class="badge bg-<?php echo $post['status'] === 'published' ? 'success' : 'warning'; ?>"><?php echo ucfirst($post['status']); ?></span></td>
                 <td><?php echo (int)$post['views']; ?></td>
                 <td><?php echo (int)$post['likes']; ?></td>
