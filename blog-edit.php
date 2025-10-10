@@ -162,6 +162,18 @@ try {
     .admin-nav nav a { margin-left: 18px; text-decoration: none; color: #51617A; font-weight: 500; }
     .admin-nav nav a.active, .admin-nav nav a:hover { color: #3C8DFF; }
     .admin-card { background: #ffffff; border-radius: 18px; box-shadow: 0 20px 60px rgba(15, 46, 91, 0.08); padding: 32px; }
+    .rich-editor { border: 1px solid #dbe4f3; border-radius: 14px; overflow: hidden; background: #ffffff; box-shadow: inset 0 1px 2px rgba(15, 46, 91, 0.06); }
+    .rich-toolbar { display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.45rem 0.55rem; background: #f0f5ff; border-bottom: 1px solid #dbe4f3; }
+    .rich-toolbar button { border: none; background: transparent; color: #405275; border-radius: 8px; width: 2.2rem; height: 2.2rem; display: inline-flex; align-items: center; justify-content: center; font-size: 1rem; transition: background 0.2s ease, color 0.2s ease; }
+    .rich-toolbar button:focus { outline: none; box-shadow: 0 0 0 2px rgba(60, 141, 255, 0.25); }
+    .rich-toolbar button:hover, .rich-toolbar button.is-active { background: rgba(60, 141, 255, 0.12); color: #2a62d5; }
+    .rich-toolbar select { border-radius: 8px; border: 1px solid #c7d3e8; padding: 0.25rem 0.5rem; background: #ffffff; color: #2f3f5d; font-size: 0.85rem; }
+    .rich-content { min-height: 160px; padding: 0.9rem; font-size: 0.98rem; line-height: 1.6; color: #23324d; }
+    .rich-content:focus { outline: none; box-shadow: inset 0 0 0 2px rgba(60, 141, 255, 0.18); }
+    .rich-content[data-empty="true"]::before { content: attr(data-placeholder); color: #8ea2c2; pointer-events: none; }
+    .rich-content a { color: #2a62d5; text-decoration: underline; }
+    .rich-content ul, .rich-content ol { padding-left: 1.25rem; margin-bottom: 0.75rem; }
+    textarea.js-rich-editor.js-rich-source-hidden { display: none !important; }
   </style>
 </head>
 <body>
