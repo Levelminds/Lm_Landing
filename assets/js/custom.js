@@ -544,22 +544,65 @@ document.addEventListener('DOMContentLoaded', countdownInit);
 
 
 
-// ========== LM Blogs: Subscription + Like Button Logic (cards + modal, DB-backed with graceful fallback) ==========
+// ========== LM Blogs: Visitor-friendly Like Button Logic (cards + modal, DB-backed with graceful fallback) ==========
 (function() {
-  const SUB_KEY = 'lmSubscribed';
   const EMAIL_KEY = 'lmEmail';
+  const TOKEN_KEY = 'lmVisitorToken';
+  const LIKE_STATE_PREFIX = 'lm_like_state_';
   const API_URL = 'api/like.php'; // adjust if your API lives elsewhere
 
-  function isSubscribed() {
-    try { return JSON.parse(localStorage.getItem(SUB_KEY) || 'false') === true; } catch { return false; }
-  }
-  function getEmail() { return (localStorage.getItem(EMAIL_KEY) || '').trim(); }
-  function setSubscribed(email) {
-    if (email) localStorage.setItem(EMAIL_KEY, email.trim());
-    localStorage.setItem(SUB_KEY, 'true');
+  function getEmail() {
+    return (localStorage.getItem(EMAIL_KEY) || '').trim();
   }
 
-  // Toast
+  function setEmail(email) {
+    if (email) {
+      localStorage.setItem(EMAIL_KEY, email.trim());
+    }
+  }
+
+  function generateToken() {
+    if (window.crypto && crypto.getRandomValues) {
+      const array = new Uint8Array(16);
+      crypto.getRandomValues(array);
+      return Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    return 'lm_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+
+  function getVisitorToken() {
+    let token = localStorage.getItem(TOKEN_KEY);
+    if (!token) {
+      token = generateToken();
+      localStorage.setItem(TOKEN_KEY, token);
+    }
+    return token;
+  }
+
+  function isLocallyLiked(postId) {
+    const newKey = LIKE_STATE_PREFIX + postId;
+    if (localStorage.getItem(newKey) === '1') {
+      return true;
+    }
+    const legacyKey = 'lm_like_' + postId;
+    if (localStorage.getItem(legacyKey) === '1') {
+      localStorage.setItem(newKey, '1');
+      localStorage.removeItem(legacyKey);
+      return true;
+    }
+    return false;
+  }
+
+  function setLocalLike(postId, liked) {
+    const key = LIKE_STATE_PREFIX + postId;
+    if (liked) {
+      localStorage.setItem(key, '1');
+    } else {
+      localStorage.removeItem(key);
+    }
+    localStorage.removeItem('lm_like_' + postId);
+  }
+
   function showToast(message) {
     let container = document.getElementById('lm-toast-container');
     if (!container) {
@@ -585,50 +628,62 @@ document.addEventListener('DOMContentLoaded', countdownInit);
     }, 2200);
   }
 
-  // Mark subscribed when newsletter form is submitted (tries to read email)
+  // Capture newsletter email so we can associate it with likes later (optional)
   document.addEventListener('submit', function(e) {
     const form = e.target;
     if (form.closest && form.closest('#newsletter')) {
       const emailInput = form.querySelector('input[type="email"], input[name="email"]');
       if (emailInput && emailInput.value) {
-        setSubscribed(emailInput.value);
-      } else {
-        localStorage.setItem(SUB_KEY, 'true');
+        setEmail(emailInput.value);
       }
-      showToast('🎉 Subscribed! You can now like posts.');
+      showToast('🎉 Thanks for subscribing!');
     }
   }, true);
 
-  // Hydrate icon state for all like buttons
+  function renderLikedState(btn, liked) {
+    const icon = btn.querySelector('.bi');
+    if (liked) {
+      btn.classList.add('liked');
+      if (icon) {
+        icon.classList.add('bi-heart-fill');
+        icon.classList.remove('bi-heart');
+      }
+    } else {
+      btn.classList.remove('liked');
+      if (icon) {
+        icon.classList.add('bi-heart');
+        icon.classList.remove('bi-heart-fill');
+      }
+    }
+  }
+
   function hydrateLikes() {
     document.querySelectorAll('[data-like-btn]').forEach(btn => {
-      const icon = btn.querySelector('.bi');
       const postId = btn.getAttribute('data-post-id');
-      const liked = localStorage.getItem('lm_like_' + postId) === '1';
-      if (liked) {
-        btn.classList.add('liked');
-        icon && icon.classList.remove('bi-heart');
-        icon && icon.classList.add('bi-heart-fill');
-      } else {
-        btn.classList.remove('liked');
-        icon && icon.classList.add('bi-heart');
-        icon && icon.classList.remove('bi-heart-fill');
-      }
+      const liked = isLocallyLiked(postId);
+      renderLikedState(btn, liked);
     });
   }
 
   async function toggleLikeServer(postId, email) {
+    const payload = {
+      post_id: postId,
+      visitor_token: getVisitorToken()
+    };
+    if (email) {
+      payload.email = email;
+    }
     const res = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ post_id: postId, email: email, action: 'toggle' })
+      body: JSON.stringify(payload)
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
+    if (!res.ok || !data || typeof data.likes !== 'number') {
       const msg = data && data.message ? data.message : 'Unable to like right now.';
       throw new Error(msg);
     }
-    return data; // { liked: true/false, likes: number }
+    return data; // { liked: bool, likes: number }
   }
 
   document.addEventListener('click', async function(e) {
@@ -637,58 +692,41 @@ document.addEventListener('DOMContentLoaded', countdownInit);
 
     const postId = btn.getAttribute('data-post-id');
     const countEl = btn.querySelector('[data-like-count]');
-    const icon = btn.querySelector('.bi');
     const email = getEmail();
 
-    if (!isSubscribed() || !email) {
-      showToast('Please subscribe to LM Blogs to use the Like feature.');
-      // Optionally, jump to the newsletter section:
-      const section = document.getElementById('newsletter');
-      if (section) section.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      return;
-    }
-
     try {
-      // Server-backed like
       const result = await toggleLikeServer(postId, email);
       const liked = !!result.liked;
-      const likes = typeof result.likes === 'number' ? result.likes : parseInt(countEl.textContent || '0', 10);
+      const likes = result.likes;
 
-      countEl.textContent = String(likes);
-      if (liked) {
-        btn.classList.add('liked');
-        icon && icon.classList.remove('bi-heart');
-        icon && icon.classList.add('bi-heart-fill');
-        localStorage.setItem('lm_like_' + postId, '1');
-      } else {
-        btn.classList.remove('liked');
-        icon && icon.classList.add('bi-heart');
-        icon && icon.classList.remove('bi-heart-fill');
-        localStorage.removeItem('lm_like_' + postId);
+      if (countEl) {
+        countEl.textContent = Number(likes).toLocaleString();
       }
+      renderLikedState(btn, liked);
+      setLocalLike(postId, liked);
+
+      document.dispatchEvent(new CustomEvent('lm:likes-updated', {
+        detail: { postId: postId, likes: likes, liked: liked }
+      }));
     } catch (err) {
-      // Fallback to local-only
-      let count = parseInt(countEl.textContent || '0', 10);
-      const storageKey = 'lm_like_' + postId;
-      const currentlyLiked = localStorage.getItem(storageKey) === '1';
-
-      if (currentlyLiked) {
-        localStorage.removeItem(storageKey);
-        count = Math.max(0, count - 1);
-        btn.classList.remove('liked');
-        icon && icon.classList.add('bi-heart');
-        icon && icon.classList.remove('bi-heart-fill');
-      } else {
-        localStorage.setItem(storageKey, '1');
-        count = count + 1;
-        btn.classList.add('liked');
-        icon && icon.classList.remove('bi-heart');
-        icon && icon.classList.add('bi-heart-fill');
+      let count = parseInt(countEl && countEl.textContent ? countEl.textContent.replace(/,/g, '') : '0', 10);
+      const liked = !isLocallyLiked(postId);
+      setLocalLike(postId, liked);
+      count = liked ? count + 1 : Math.max(0, count - 1);
+      if (countEl) {
+        countEl.textContent = Number(count).toLocaleString();
       }
-      countEl.textContent = String(count);
+      renderLikedState(btn, liked);
       showToast(err && err.message ? err.message : 'Saved locally (offline).');
+
+      document.dispatchEvent(new CustomEvent('lm:likes-updated', {
+        detail: { postId: postId, likes: count, liked: liked }
+      }));
     }
   });
+
+  window.LM = window.LM || {};
+  window.LM.hydrateLikes = hydrateLikes;
 
   document.addEventListener('DOMContentLoaded', hydrateLikes);
 })();
