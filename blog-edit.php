@@ -10,6 +10,9 @@ $dbname = 'u420143207_LM_landing';
 $username = 'u420143207_lmlanding';
 $password = 'Levelminds@2024';
 
+$html5Flag = defined('ENT_HTML5') ? ENT_HTML5 : ENT_COMPAT;
+$substituteFlag = defined('ENT_SUBSTITUTE') ? ENT_SUBSTITUTE : 0;
+
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 if ($id <= 0) {
     header('Location: blogs-manage.php');
@@ -203,8 +206,9 @@ try {
             }
         }
     }
-} catch (PDOException $e) {
-    $error = 'Database error: ' . htmlspecialchars($e->getMessage());
+} catch (Throwable $e) {
+    error_log('[blog-edit.php] ' . $e->getMessage());
+    $error = 'Database error: ' . adminEscape($e->getMessage());
 }
 ?>
 <!DOCTYPE html>
@@ -257,17 +261,31 @@ try {
 
     <div class="admin-card">
       <h1 class="h4 mb-3" style="font-weight: 700; color: #0F1D3B;">Edit blog post</h1>
-      <?php if ($message): ?><div class="alert alert-success"><?php echo htmlspecialchars($message); ?></div><?php endif; ?>
-      <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
+      <?php if ($message): ?><div class="alert alert-success"><?php echo adminEscape($message); ?></div><?php endif; ?>
+      <?php if ($error): ?><div class="alert alert-danger"><?php echo adminEscape($error); ?></div><?php endif; ?>
 
       <form method="POST" class="row g-4" enctype="multipart/form-data" data-blog-form>
         <div class="col-12">
           <label class="form-label fw-semibold">Title *</label>
-          <input type="text" name="title" class="form-control" value="<?php echo htmlspecialchars($post['title']); ?>" required>
+          <input type="text" name="title" class="form-control" value="<?php echo adminEscape($post['title']); ?>" required>
         </div>
         <div class="col-md-3">
           <label class="form-label fw-semibold">Author</label>
-          <input type="text" name="author" class="form-control" value="<?php echo htmlspecialchars($post['author']); ?>">
+          <input type="text" name="author" class="form-control" value="<?php echo adminEscape($post['author']); ?>">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Audience Category *</label>
+          <?php $currentCategory = $post['category'] ?? 'general'; ?>
+          <?php if ($hasCategoryColumn): ?>
+          <select name="category" class="form-select" required>
+            <option value="teachers" <?php echo $currentCategory === 'teachers' ? 'selected' : ''; ?>>For Teachers</option>
+            <option value="schools" <?php echo $currentCategory === 'schools' ? 'selected' : ''; ?>>For Schools</option>
+            <option value="general" <?php echo $currentCategory === 'general' ? 'selected' : ''; ?>>General Insights</option>
+          </select>
+          <?php else: ?>
+          <input type="hidden" name="category" value="general">
+          <div class="form-text text-muted">Categories will default to General until the database is updated.</div>
+          <?php endif; ?>
         </div>
         <div class="col-md-3">
           <label class="form-label fw-semibold">Audience Category *</label>
@@ -303,7 +321,7 @@ try {
         <?php endif; ?>
         <div class="col-12">
           <label class="form-label fw-semibold">Image or Video URL *</label>
-          <input type="url" name="media_url" class="form-control" value="<?php echo htmlspecialchars($post['media_url']); ?>" placeholder="https://...">
+          <input type="url" name="media_url" class="form-control" value="<?php echo adminEscape($post['media_url']); ?>" placeholder="https://...">
           <small class="text-muted">Provide a hosted image or video URL (e.g. CDN, YouTube). Uploading a file below will override this field.</small>
         </div>
         <div class="col-12" data-media-field>

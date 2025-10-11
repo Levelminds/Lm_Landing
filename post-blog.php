@@ -10,6 +10,9 @@ $dbname = 'u420143207_LM_landing';
 $username = 'u420143207_lmlanding';
 $password = 'Levelminds@2024';
 
+$html5Flag = defined('ENT_HTML5') ? ENT_HTML5 : ENT_COMPAT;
+$substituteFlag = defined('ENT_SUBSTITUTE') ? ENT_SUBSTITUTE : 0;
+
 $message = null;
 $error = null;
 $hasCategoryColumn = null;
@@ -170,8 +173,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt = $pdo->prepare("INSERT INTO blog_posts ($columns) VALUES ($placeholders)");
                 $stmt->execute($params);
                 $message = 'Blog post saved successfully.';
-            } catch (PDOException $e) {
-                $error = 'Database error: ' . htmlspecialchars($e->getMessage());
+            } catch (Throwable $e) {
+                error_log('[post-blog.php] ' . $e->getMessage());
+                $error = 'Database error: ' . adminEscape($e->getMessage());
             }
         }
     }
@@ -229,8 +233,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       <h1 class="h4 mb-3" style="font-weight: 700; color: #0F1D3B;">Publish a new blog post</h1>
       <p class="text-muted mb-4">Use this form to add photo or video updates that appear on the LevelMinds blog.</p>
 
-      <?php if ($message): ?><div class="alert alert-success"><?php echo htmlspecialchars($message); ?></div><?php endif; ?>
-      <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
+      <?php if ($message): ?><div class="alert alert-success"><?php echo adminEscape($message); ?></div><?php endif; ?>
+      <?php if ($error): ?><div class="alert alert-danger"><?php echo adminEscape($error); ?></div><?php endif; ?>
 
       <form method="POST" class="row g-4" enctype="multipart/form-data" data-blog-form>
         <div class="col-12">

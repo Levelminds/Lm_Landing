@@ -4,6 +4,9 @@ $dbname = 'u420143207_LM_landing';
 $username = 'u420143207_lmlanding';
 $password = 'Levelminds@2024';
 
+$html5Flag = defined('ENT_HTML5') ? ENT_HTML5 : ENT_COMPAT;
+$substituteFlag = defined('ENT_SUBSTITUTE') ? ENT_SUBSTITUTE : 0;
+
 $posts = [];
 $error = '';
 $hasCategoryColumn = false;
