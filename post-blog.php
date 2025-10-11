@@ -72,10 +72,22 @@ try {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $title = trim($_POST['title'] ?? '');
-    $author = trim($_POST['author'] ?? 'LevelMinds Team');
+    $titleValue = $title;
+
+    $authorInput = trim($_POST['author'] ?? '');
+    $authorValue = $authorInput;
+    $author = $authorInput !== '' ? $authorInput : 'LevelMinds Team';
+
     $summary = trim($_POST['summary'] ?? '');
+    $summaryValue = $summary;
+
     $content = trim($_POST['content'] ?? '');
+    $contentValue = $content;
+
     $mediaType = $_POST['media_type'] ?? 'photo';
+    $mediaType = $mediaType === 'video' ? 'video' : 'photo';
+    $mediaTypeValue = $mediaType;
+
     $mediaUrl = trim($_POST['media_url'] ?? '');
     $category = $_POST['category'] ?? 'general';
     $views = max(0, (int)($_POST['views'] ?? 0));
@@ -239,11 +251,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       <form method="POST" class="row g-4" enctype="multipart/form-data" data-blog-form>
         <div class="col-12">
           <label class="form-label fw-semibold">Title *</label>
-          <input type="text" name="title" class="form-control" required>
+          <input type="text" name="title" class="form-control" value="<?php echo adminEscape($titleValue); ?>" required>
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Author</label>
-          <input type="text" name="author" class="form-control" placeholder="LevelMinds Team">
+          <input type="text" name="author" class="form-control" value="<?php echo adminEscape($authorValue); ?>" placeholder="LevelMinds Team">
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Audience Category *</label>
@@ -261,13 +273,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="col-md-4">
           <label class="form-label fw-semibold">Blog Type *</label>
           <select name="media_type" class="form-select" required>
-            <option value="photo">Photo Blog</option>
-            <option value="video">Video Blog</option>
+            <option value="photo" <?php echo $mediaTypeValue === 'photo' ? 'selected' : ''; ?>>Photo Blog</option>
+            <option value="video" <?php echo $mediaTypeValue === 'video' ? 'selected' : ''; ?>>Video Blog</option>
           </select>
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Image or Video URL *</label>
-          <input type="url" name="media_url" class="form-control" placeholder="https://...">
+          <input type="url" name="media_url" class="form-control" value="<?php echo adminEscape($mediaUrlValue); ?>" placeholder="https://...">
           <small class="text-muted">Provide a hosted image or video URL (e.g. CDN, YouTube). Uploading a file below will override this field.</small>
         </div>
         <div class="col-12" data-media-field>
@@ -302,15 +314,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Initial Views</label>
-          <input type="number" name="views" class="form-control" min="0" value="0">
+          <input type="number" name="views" class="form-control" min="0" value="<?php echo (int) $viewsValue; ?>">
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Initial Likes</label>
-          <input type="number" name="likes" class="form-control" min="0" value="0">
+          <input type="number" name="likes" class="form-control" min="0" value="<?php echo (int) $likesValue; ?>">
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Initial Responses</label>
-          <input type="number" name="responses" class="form-control" min="0" value="0">
+          <input type="number" name="responses" class="form-control" min="0" value="<?php echo (int) $responsesValue; ?>">
         </div>
         <div class="col-12">
           <button type="submit" class="btn btn-primary btn-lg px-4">Save Blog Post</button>
