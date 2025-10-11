@@ -5,6 +5,82 @@
   }
 
   const modalEl = document.getElementById('mediaCropModal');
+  if (!modalEl) {
+    return;
+  }
+
+  const hasBootstrapModal = (typeof bootstrap !== 'undefined' && bootstrap.Modal) || (window.bootstrap && window.bootstrap.Modal);
+
+  function handleModalHidden() {
+    if (cropper) {
+      cropper.destroy();
+      cropper = null;
+    }
+    previewImage.src = '';
+    currentFile = null;
+    currentInput = null;
+    currentType = 'image';
+    naturalWidth = 0;
+    naturalHeight = 0;
+    resetModalState();
+    clearPreviewUrls();
+  }
+
+  function createFallbackModal(element) {
+    let backdrop = null;
+    let api;
+
+    const handleKeydown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        api.hide();
+      }
+    };
+
+    api = {
+      show() {
+        if (!backdrop) {
+          backdrop = document.createElement('div');
+          backdrop.className = 'modal-backdrop fade show';
+          backdrop.setAttribute('data-fallback-backdrop', 'true');
+        }
+        if (!backdrop.parentNode) {
+          document.body.appendChild(backdrop);
+        }
+        element.classList.add('show');
+        element.style.display = 'block';
+        element.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('modal-open');
+        document.addEventListener('keydown', handleKeydown, true);
+      },
+      hide() {
+        element.classList.remove('show');
+        element.style.display = 'none';
+        element.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('modal-open');
+        if (backdrop && backdrop.parentNode) {
+          backdrop.parentNode.removeChild(backdrop);
+        }
+        document.removeEventListener('keydown', handleKeydown, true);
+        handleModalHidden();
+      }
+    };
+
+    return api;
+  }
+
+  const ModalClass = hasBootstrapModal
+    ? ((typeof bootstrap !== 'undefined' && bootstrap.Modal) ? bootstrap.Modal : window.bootstrap.Modal)
+    : null;
+
+  const modal = ModalClass ? new ModalClass(modalEl, { backdrop: 'static' }) : createFallbackModal(modalEl);
+
+  modalEl.querySelectorAll('[data-bs-dismiss="modal"]').forEach((btn) => {
+    btn.addEventListener('click', (event) => {
+      event.preventDefault();
+      modal.hide();
+    });
+  });
   if (!modalEl || typeof bootstrap === 'undefined') {
     return;
   }
@@ -38,6 +114,48 @@
   let naturalHeight = 0;
   let ffmpeg = null;
   let ffmpegLoading = false;
+  let cropperLoading = false;
+  const previewUrls = new Set();
+
+  async function ensureCropperLoaded() {
+    if (typeof window.Cropper !== 'undefined') {
+      return;
+    }
+
+    if (cropperLoading && window.__lmCropperLoader) {
+      await window.__lmCropperLoader;
+      return;
+    }
+
+    cropperLoading = true;
+    window.__lmCropperLoader = new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[data-lm-cropper]');
+      if (existing) {
+        existing.addEventListener('load', () => resolve(), { once: true });
+        existing.addEventListener('error', () => reject(new Error('Unable to load the media editor.')), { once: true });
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/cropperjs@1.5.13/dist/cropper.min.js';
+      script.async = true;
+      script.setAttribute('data-lm-cropper', '');
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('Unable to load the media editor.'));
+      document.head.appendChild(script);
+    });
+
+    try {
+      await window.__lmCropperLoader;
+    } finally {
+      cropperLoading = false;
+    }
+
+    if (typeof window.Cropper === 'undefined') {
+      throw new Error('Media editor failed to initialise.');
+    }
+  }
+
   const previewUrls = new Set();
 
   function clearPreviewUrls() {
@@ -95,6 +213,11 @@
       cropper = null;
     }
 
+    if (typeof window.Cropper === 'undefined') {
+      throw new Error('Media editor is still loading.');
+    }
+
+    cropper = new window.Cropper(previewImage, {
     cropper = new Cropper(previewImage, {
       aspectRatio: aspectRatio,
       viewMode: 2,
@@ -134,6 +257,8 @@
   }
 
   function updatePreviewContainer(file, input) {
+    const field = input.closest('[data-media-field]');
+    const previewWrapper = field ? field.querySelector('[data-media-preview]') : null;
     const previewWrapper = input.closest('[data-media-field]')?.querySelector('[data-media-preview]');
     if (!previewWrapper) {
       return;
@@ -339,6 +464,7 @@
     }
   });
 
+  modalEl.addEventListener('hidden.bs.modal', handleModalHidden);
   modalEl.addEventListener('hidden.bs.modal', () => {
     if (cropper) {
       cropper.destroy();
@@ -439,12 +565,14 @@
 
       currentInput = fileInput;
       currentFile = file;
+      const type = ((mediaTypeSelect && mediaTypeSelect.value === 'video') || file.type.startsWith('video')) ? 'video' : 'image';
       const type = (mediaTypeSelect?.value === 'video' || file.type.startsWith('video')) ? 'video' : 'image';
       currentType = type;
       resetModalState();
       ratioSelect.value = type === 'video' ? '16:9' : 'original';
 
       try {
+        await ensureCropperLoaded();
         if (type === 'video') {
           const preview = await prepareVideoPreview(file);
           previewImage.src = preview.url;
@@ -466,6 +594,16 @@
               bindCropper(ratioMap[ratioSelect.value]);
               modal.show();
             };
+            temp.onerror = () => {
+              errorBox.textContent = 'Unable to preview this image. Please try a different file.';
+              errorBox.classList.remove('d-none');
+            };
+            temp.src = reader.result;
+          };
+          reader.onerror = () => {
+            errorBox.textContent = 'Unable to read the selected image file.';
+            errorBox.classList.remove('d-none');
+          };
             temp.src = reader.result;
           };
           reader.readAsDataURL(file);
@@ -485,11 +623,22 @@
     });
 
     if (adjustButton) {
+      adjustButton.addEventListener('click', async () => {
       adjustButton.addEventListener('click', () => {
         if (!fileInput.files.length) {
           fileInput.click();
           return;
         }
+        try {
+          await ensureCropperLoaded();
+        } catch (loadError) {
+          errorBox.textContent = loadError.message || 'Media editor failed to load.';
+          errorBox.classList.remove('d-none');
+          return;
+        }
+        currentInput = fileInput;
+        const file = fileInput.files[0];
+        const type = ((mediaTypeSelect && mediaTypeSelect.value === 'video') || file.type.startsWith('video')) ? 'video' : 'image';
         currentInput = fileInput;
         const file = fileInput.files[0];
         const type = (mediaTypeSelect?.value === 'video' || file.type.startsWith('video')) ? 'video' : 'image';
@@ -499,6 +648,19 @@
         ratioSelect.value = type === 'video' ? '16:9' : 'original';
 
         if (type === 'video') {
+          try {
+            const preview = await prepareVideoPreview(file);
+            previewImage.src = preview.url;
+            naturalWidth = preview.dimensions.width;
+            naturalHeight = preview.dimensions.height;
+            originalSizeLabel.textContent = `${naturalWidth} × ${naturalHeight}`;
+            currentType = 'video';
+            bindCropper(ratioMap[ratioSelect.value]);
+            modal.show();
+          } catch (error) {
+            errorBox.textContent = error.message || 'Unable to prepare video for editing.';
+            errorBox.classList.remove('d-none');
+          }
           prepareVideoPreview(file)
             .then((preview) => {
               previewImage.src = preview.url;
@@ -526,6 +688,16 @@
               bindCropper(ratioMap[ratioSelect.value]);
               modal.show();
             };
+            temp.onerror = () => {
+              errorBox.textContent = 'Unable to preview this image. Please try a different file.';
+              errorBox.classList.remove('d-none');
+            };
+            temp.src = reader.result;
+          };
+          reader.onerror = () => {
+            errorBox.textContent = 'Unable to read the selected image file.';
+            errorBox.classList.remove('d-none');
+          };
             temp.src = reader.result;
           };
           reader.readAsDataURL(file);
