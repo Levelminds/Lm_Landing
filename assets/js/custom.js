@@ -688,7 +688,9 @@ document.addEventListener('DOMContentLoaded', countdownInit);
 
   document.addEventListener('click', async function(e) {
     const btn = e.target.closest && e.target.closest('[data-like-btn]');
-    if (!btn) return;
+    if (!btn) {
+      return;
+    }
 
     const postId = btn.getAttribute('data-post-id');
     const countEl = btn.querySelector('[data-like-count]');
