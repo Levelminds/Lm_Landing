@@ -1,141 +1,64 @@
 <?php
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
 $host = 'localhost';
 $dbname = 'u420143207_LM_landing';
 $username = 'u420143207_lmlanding';
 $password = 'Levelminds@2024';
 
-$html5Flag = defined('ENT_HTML5') ? ENT_HTML5 : ENT_COMPAT;
-$substituteFlag = defined('ENT_SUBSTITUTE') ? ENT_SUBSTITUTE : 0;
-
 $posts = [];
 $error = '';
 $hasCategoryColumn = false;
-
-function blogCategoryColumnExists(PDO $pdo)
-{
-    try {
-        $stmt = $pdo->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'blog_posts' AND COLUMN_NAME = 'category'");
-        return (bool) $stmt->fetchColumn();
-    } catch (PDOException $e) {
-        try {
-            $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
-            return $check && $check->fetch();
-        } catch (PDOException $inner) {
-            return false;
-        }
-    }
-}
-
-function ensureBlogCategoryColumn(PDO $pdo)
-{
-    if (blogCategoryColumnExists($pdo)) {
-        return true;
-    }
-
-    try {
-        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
-    } catch (PDOException $e) {
-        return false;
-    }
-
-    return blogCategoryColumnExists($pdo);
-}
-
-function deduplicateBlogPosts(array $items)
-{
-    $unique = [];
-    $seen = [];
-
-    foreach ($items as $item) {
-        $id = isset($item['id']) ? (string) $item['id'] : '';
-        $key = $id !== '' ? $id : sha1(json_encode($item));
-
-        if (isset($seen[$key])) {
-            continue;
-        }
-
-        $seen[$key] = true;
-        $unique[] = $item;
-    }
-
-    return array_values($unique);
-}
-
-function encodeBlogDataAttr($value)
-{
-    if ($value === null || $value === '') {
-        return '';
-    }
-
-    return base64_encode((string) $value);
-}   
-
-{
-    try {
-        $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
-        if ($check && $check->fetch()) {
-            return true;
-        }
-
-        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
-        return true;
-    } catch (PDOException $e) {
-        return false;
-    }
-}
 
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     ]);
-    $hasCategoryColumn = ensureBlogCategoryColumn($pdo);
-    $columns = 'id, title, author, summary, content, media_type, media_url, created_at, views, likes';
-    if ($hasCategoryColumn) {
-        $columns .= ', category';
-    }
-
-    try {
-        $stmt = $pdo->query("SELECT $columns FROM blog_posts WHERE status = 'published' ORDER BY created_at DESC");
-    } catch (PDOException $queryException) {
-        if ($hasCategoryColumn) {
-            $hasCategoryColumn = false;
-            $stmt = $pdo->query("SELECT id, title, author, summary, content, media_type, media_url, created_at, views, likes FROM blog_posts WHERE status = 'published' ORDER BY created_at DESC");
-        } else {
-            throw $queryException;
-        }
-    }
-    $posts = deduplicateBlogPosts($stmt->fetchAll(PDO::FETCH_ASSOC));
-    $stmt = $pdo->query("SELECT id, title, author, summary, content, media_type, media_url, category, created_at, views, likes FROM blog_posts WHERE status = 'published' ORDER BY created_at DESC");
-    $posts = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
-    $error = 'Unable to load blog posts right now.';
+    die("Database connection failed: " . htmlspecialchars($e->getMessage()));
 }
 
-if (!$posts) {
-    $fallbackPath = __DIR__ . '/data/blogs.json';
-    if (is_readable($fallbackPath)) {
-        $fallbackData = json_decode(file_get_contents($fallbackPath), true);
-        if (is_array($fallbackData)) {
-            $posts = array_values(array_filter($fallbackData, function ($item) {
-                return is_array($item) && isset($item['title'], $item['summary'], $item['media_url']);
-            }));
-            $posts = deduplicateBlogPosts($posts);
-            usort($posts, function ($a, $b) {
-                return strcmp($b['created_at'] ?? '', $a['created_at'] ?? '');
-            });
-            if ($posts) {
-                $error = '';
-            }
-        }
+function blogCategoryColumnExists(PDO $pdo): bool {
+    try {
+        $stmt = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
+        return $stmt && $stmt->fetch() ? true : false;
+    } catch (PDOException $e) {
+        return false;
     }
 }
 
-function formatBlogDate($value)
-{
-    if (empty($value)) {
-        return '—';
+function ensureBlogCategoryColumn(PDO $pdo): bool {
+    if (blogCategoryColumnExists($pdo)) {
+        return true;
     }
+    try {
+        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url");
+    } catch (PDOException $e) {
+        return false;
+    }
+    return blogCategoryColumnExists($pdo);
+}
 
+function deduplicateBlogPosts(array $items): array {
+    $unique = [];
+    $seen = [];
+    foreach ($items as $item) {
+        $id = isset($item['id']) ? (string) $item['id'] : '';
+        $key = $id !== '' ? $id : sha1(json_encode($item));
+        if (isset($seen[$key])) continue;
+        $seen[$key] = true;
+        $unique[] = $item;
+    }
+    return $unique;
+}
+
+function encodeBlogDataAttr($value): string {
+    return $value === null || $value === '' ? '' : base64_encode((string)$value);
+}
+
+function formatBlogDate($value): string {
+    if (empty($value)) return '—';
     try {
         $date = new DateTime($value);
         return $date->format('M j, Y');
@@ -144,35 +67,50 @@ function formatBlogDate($value)
     }
 }
 
-function decodeBlogPlain($value)
-{
-    if ($value === null || $value === '') {
-        return '';
-    }
-
-    return trim(html_entity_decode(strip_tags((string) $value), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+function decodeBlogPlain($value): string {
+    return trim(html_entity_decode(strip_tags((string)$value), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
 }
 
-function buildBlogShareUrl($postId)
-{
-    $postId = (int) $postId;
-    if ($postId <= 0) {
-        return '';
-    }
-
+function buildBlogShareUrl($postId): string {
+    $postId = (int)$postId;
+    if ($postId <= 0) return '';
     $host = $_SERVER['HTTP_HOST'] ?? 'levelminds.in';
     $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-
     return sprintf('%s://%s/blogs.php?post=%d', $scheme, $host, $postId);
 }
 
-$featured = $posts[0] ?? null;
+// ensure category column exists
+$hasCategoryColumn = ensureBlogCategoryColumn($pdo);
 
+// fetch posts
+$columns = "id, title, author, summary, content, media_type, media_url, created_at, views, likes" . 
+           ($hasCategoryColumn ? ", category" : "");
+
+try {
+    $stmt = $pdo->query("SELECT $columns FROM blog_posts WHERE status = 'published' ORDER BY created_at DESC");
+    $posts = deduplicateBlogPosts($stmt->fetchAll(PDO::FETCH_ASSOC));
+} catch (PDOException $e) {
+    $error = "Unable to load blog posts: " . $e->getMessage();
+}
+
+// fallback if empty
+if (!$posts) {
+    $fallbackPath = __DIR__ . '/data/blogs.json';
+    if (is_readable($fallbackPath)) {
+        $json = json_decode(file_get_contents($fallbackPath), true);
+        if (is_array($json)) {
+            $posts = deduplicateBlogPosts($json);
+        }
+    }
+}
+
+$featured = $posts[0] ?? null;
 $audienceLabels = [
     'teachers' => 'For Teachers',
     'schools'  => 'For Schools',
     'general'  => 'General Insights'
 ];
+
 
 $groupedPosts = [];
 foreach ($posts as $post) {
