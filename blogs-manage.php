@@ -13,6 +13,52 @@ $password = 'Levelminds@2024';
 $message = '';
 $error = '';
 $posts = [];
+$hasCategoryColumn = false;
+$hasStatusColumn = false;
+$audienceLabels = [
+    'teachers' => 'For Teachers',
+    'schools'  => 'For Schools',
+    'general'  => 'General'
+];
+
+function blogColumnExists(PDO $pdo, $column)
+{
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'blog_posts' AND COLUMN_NAME = :column"
+        );
+        $stmt->execute(['column' => $column]);
+        return (bool) $stmt->fetchColumn();
+    } catch (PDOException $e) {
+        try {
+            $check = $pdo->prepare("SHOW COLUMNS FROM blog_posts LIKE :column");
+            $check->execute(['column' => $column]);
+            return (bool) $check->fetch(PDO::FETCH_ASSOC);
+        } catch (PDOException $inner) {
+            return false;
+        }
+    }
+}
+
+function blogCategoryColumnExists(PDO $pdo)
+{
+    return blogColumnExists($pdo, 'category');
+}
+
+function ensureBlogCategoryColumn(PDO $pdo)
+{
+    if (blogCategoryColumnExists($pdo)) {
+        return true;
+    }
+
+    try {
+        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
+    } catch (PDOException $e) {
+        return false;
+    }
+
+    return blogCategoryColumnExists($pdo);
+}
 
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
@@ -26,7 +72,38 @@ try {
         $message = 'Blog post deleted.';
     }
 
-    $postsStmt = $pdo->query('SELECT id, title, author, media_type, status, created_at, views, likes FROM blog_posts ORDER BY created_at DESC');
+    $hasCategoryColumn = ensureBlogCategoryColumn($pdo);
+    $hasStatusColumn = blogColumnExists($pdo, 'status');
+    $columns = ['id', 'title', 'author', 'media_type', 'created_at', 'views', 'likes'];
+    if ($hasStatusColumn) {
+        $columns[] = 'status';
+    }
+    if ($hasCategoryColumn) {
+        $columns[] = 'category';
+    }
+    $columnSql = implode(', ', $columns);
+
+    try {
+        $postsStmt = $pdo->query("SELECT $columnSql FROM blog_posts ORDER BY created_at DESC");
+    } catch (PDOException $queryException) {
+        if ($hasCategoryColumn && !blogCategoryColumnExists($pdo)) {
+            $hasCategoryColumn = false;
+        }
+        if ($hasStatusColumn && !blogColumnExists($pdo, 'status')) {
+            $hasStatusColumn = false;
+        }
+
+        if (!$hasCategoryColumn || !$hasStatusColumn) {
+            $columns = ['id', 'title', 'author', 'media_type', 'created_at', 'views', 'likes'];
+            if ($hasStatusColumn) {
+                $columns[] = 'status';
+            }
+            $columnSql = implode(', ', $columns);
+            $postsStmt = $pdo->query("SELECT $columnSql FROM blog_posts ORDER BY created_at DESC");
+        } else {
+            throw $queryException;
+        }
+    }
     $posts = $postsStmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     $error = 'Database error: ' . htmlspecialchars($e->getMessage());
@@ -84,7 +161,8 @@ try {
               <tr>
                 <th scope="col">Title</th>
                 <th scope="col">Type</th>
-                <th scope="col">Status</th>
+                <th scope="col">Audience</th>
+                <?php if ($hasStatusColumn): ?><th scope="col">Status</th><?php endif; ?>
                 <th scope="col">Views</th>
                 <th scope="col">Likes</th>
                 <th scope="col">Published</th>
@@ -99,7 +177,15 @@ try {
                   <small class="text-muted">By <?php echo htmlspecialchars($post['author']); ?></small>
                 </td>
                 <td><span class="badge bg-<?php echo $post['media_type'] === 'video' ? 'info' : 'secondary'; ?>"><?php echo ucfirst($post['media_type']); ?></span></td>
-                <td><span class="badge bg-<?php echo $post['status'] === 'published' ? 'success' : 'warning'; ?>"><?php echo ucfirst($post['status']); ?></span></td>
+                <td><?php
+                  $categoryKey = $hasCategoryColumn ? ($post['category'] ?? 'general') : 'general';
+                  $label = $audienceLabels[$categoryKey] ?? ucfirst($categoryKey);
+                  echo htmlspecialchars($label);
+                ?></td>
+                <?php if ($hasStatusColumn): ?>
+                <?php $statusValue = $post['status'] ?? 'published'; ?>
+                <td><span class="badge bg-<?php echo $statusValue === 'published' ? 'success' : 'warning'; ?>"><?php echo htmlspecialchars(ucfirst($statusValue)); ?></span></td>
+                <?php endif; ?>
                 <td><?php echo (int)$post['views']; ?></td>
                 <td><?php echo (int)$post['likes']; ?></td>
                 <td><?php echo date('M j, Y', strtotime($post['created_at'])); ?></td>
