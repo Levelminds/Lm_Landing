@@ -1,544 +1,208 @@
 <?php
 session_start();
-if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
-    header('Location: admin.php');
-    exit;
-}
+if (empty($_SESSION['admin_logged_in'])) { header('Location: admin.php'); exit; }
 
 $host = 'localhost';
 $dbname = 'u420143207_LM_landing';
 $username = 'u420143207_lmlanding';
 $password = 'Levelminds@2024';
 
-$html5Flag = defined('ENT_HTML5') ? ENT_HTML5 : ENT_COMPAT;
-$substituteFlag = defined('ENT_SUBSTITUTE') ? ENT_SUBSTITUTE : 0;
-
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
-if ($id <= 0) {
-    header('Location: blogs-manage.php');
-    exit;
+if ($id <= 0) { header('Location: blogs-manage.php'); exit; }
+
+$msg = $err = ''; $post = [];
+
+function image_auto_resize(string $path, string $ext, int $max=1600): void {
+    $create = ['jpg'=>'imagecreatefromjpeg','jpeg'=>'imagecreatefromjpeg','png'=>'imagecreatefrompng','gif'=>'imagecreatefromgif','webp'=>'imagecreatefromwebp'];
+    $save   = ['jpg'=>'imagejpeg','jpeg'=>'imagejpeg','png'=>'imagepng','gif'=>'imagegif','webp'=>'imagewebp'];
+    $ext = strtolower($ext);
+    if (!isset($create[$ext], $save[$ext])) return;
+    $img = @$create[$ext]($path);
+    if (!$img) return;
+    $w = imagesx($img); $h = imagesy($img);
+    if ($w <= $max && $h <= $max) { imagedestroy($img); return; }
+    $ratio = $w/$h;
+    if ($w >= $h) { $nw=$max; $nh=(int)round($max/$ratio); } else { $nh=$max; $nw=(int)round($max*$ratio); }
+    $dst = imagecreatetruecolor($nw,$nh);
+    imagealphablending($dst, false); imagesavealpha($dst, true);
+    imagecopyresampled($dst,$img,0,0,0,0,$nw,$nh,$w,$h);
+    if ($ext==='jpg' || $ext==='jpeg') $save[$ext]($dst,$path,85);
+    else $save[$ext]($dst,$path);
+    imagedestroy($img); imagedestroy($dst);
 }
-
-$message = '';
-$error = '';
-$hasCategoryColumn = false;
-
-function blogCategoryColumnExists(PDO $pdo)
-{
-    try {
-        $stmt = $pdo->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'blog_posts' AND COLUMN_NAME = 'category'");
-        return (bool) $stmt->fetchColumn();
-    } catch (PDOException $e) {
-        try {
-            $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
-            return $check && $check->fetch();
-        } catch (PDOException $inner) {
-            return false;
-        }
+function save_image_from_upload_or_base64(array $file, ?string $b64, string $destDir): array {
+    if (!is_dir($destDir)) mkdir($destDir, 0755, true);
+    if ($b64) {
+        if (!preg_match('#^data:image/(png|jpe?g|webp);base64,#i', $b64, $m)) return ['ok'=>false,'path'=>'','error'=>'Invalid cropped image format.'];
+        $ext = strtolower($m[1] === 'jpeg' ? 'jpg' : $m[1]);
+        $data = base64_decode(preg_replace('#^data:image/[^;]+;base64,#','',$b64));
+        if ($data === false) return ['ok'=>false,'path'=>'','error'=>'Invalid cropped image data.'];
+        $name = 'blog_'.uniqid().'.'.$ext; $target = rtrim($destDir,'/').'/'.$name;
+        if (file_put_contents($target,$data)===false) return ['ok'=>false,'path'=>'','error'=>'Write failed.'];
+        image_auto_resize($target,$ext);
+        return ['ok'=>true,'path'=>"uploads/blogs/$name",'error'=>''];
     }
-}
-
-function ensureBlogCategoryColumn(PDO $pdo)
-{
-    if (blogCategoryColumnExists($pdo)) {
-        return true;
-    }
-
-    try {
-        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
-    } catch (PDOException $e) {
-        return false;
-    }
-
-    return blogCategoryColumnExists($pdo);
-function ensureBlogCategoryColumn(PDO $pdo)
-{
-    try {
-        $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
-        if ($check && $check->fetch()) {
-            return true;
-        }
-
-        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
-        return true;
-    } catch (PDOException $e) {
-        return false;
-    }
+    if (!isset($file['tmp_name']) || $file['error']===UPLOAD_ERR_NO_FILE) return ['ok'=>false,'path'=>'','error'=>'No file uploaded.'];
+    if ($file['error']!==UPLOAD_ERR_OK) return ['ok'=>false,'path'=>'','error'=>'Upload error.'];
+    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    if (!in_array($ext,['jpg','jpeg','png','gif','webp'],true)) return ['ok'=>false,'path'=>'','error'=>'Unsupported image type.'];
+    $name = 'blog_'.uniqid().'.'.$ext; $target = rtrim($destDir,'/').'/'.$name;
+    if (!move_uploaded_file($file['tmp_name'],$target)) return ['ok'=>false,'path'=>'','error'=>'Move failed.'];
+    image_auto_resize($target,$ext);
+    return ['ok'=>true,'path'=>"uploads/blogs/$name",'error'=>''];
 }
 
 try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-    ]);
+    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
+    $stmt = $pdo->prepare('SELECT * FROM blog_posts WHERE id=:id LIMIT 1');
+    $stmt->execute([':id'=>$id]); $post = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$post) { header('Location: blogs-manage.php'); exit; }
 
-    $hasCategoryColumn = ensureBlogCategoryColumn($pdo);
-
-    $stmt = $pdo->prepare('SELECT * FROM blog_posts WHERE id = :id LIMIT 1');
-    $stmt->execute(['id' => $id]);
-    $post = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if ($post && !$hasCategoryColumn && !isset($post['category'])) {
-        $post['category'] = 'general';
-    }
-
-    if (!$post) {
-        header('Location: blogs-manage.php');
-        exit;
-    }
-
-    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if ($_SERVER['REQUEST_METHOD']==='POST') {
         $title = trim($_POST['title'] ?? '');
         $author = trim($_POST['author'] ?? 'LevelMinds Team');
         $summary = trim($_POST['summary'] ?? '');
         $content = trim($_POST['content'] ?? '');
-        $mediaType = $_POST['media_type'] ?? 'photo';
-        $mediaUrl = trim($_POST['media_url'] ?? '');
-        $status = $_POST['status'] ?? 'published';
+        $mediaType = $_POST['media_type'] ?? $post['media_type'];
+        $mediaUrl = trim($_POST['media_url'] ?? $post['media_url']);
+        $status = $_POST['status'] ?? $post['status'];
         $category = $_POST['category'] ?? ($post['category'] ?? 'general');
         $views = max(0, (int)($_POST['views'] ?? $post['views']));
         $likes = max(0, (int)($_POST['likes'] ?? $post['likes']));
         $responses = max(0, (int)($_POST['responses'] ?? $post['responses']));
+        $croppedB64 = $_POST['cropped_image'] ?? '';
 
-        if ($hasCategoryColumn) {
-            $allowedCategories = ['teachers', 'schools', 'general'];
-            if (!in_array($category, $allowedCategories, true)) {
-                $category = 'general';
-            }
-        } else {
-        $allowedCategories = ['teachers', 'schools', 'general'];
-        if (!in_array($category, $allowedCategories, true)) {
-            $category = 'general';
+        if ($title==='' || $summary==='' || $content==='') $err = 'Please fill in title, summary and content.';
+
+        if (!$err && $mediaType==='photo' && (isset($_FILES['media_file']) && $_FILES['media_file']['error']!==UPLOAD_ERR_NO_FILE || $croppedB64)) {
+            $saved = save_image_from_upload_or_base64($_FILES['media_file'] ?? [], $croppedB64, __DIR__.'/uploads/blogs');
+            if ($saved['ok']) $mediaUrl = $saved['path']; else $err = $saved['error'];
         }
+        if (!$err && $mediaType==='video' && $mediaUrl==='') $err = 'Provide a video URL.';
 
-        if ($title === '' || $summary === '' || $content === '') {
-            $error = 'Please fill in the required fields (title, summary, and content).';
-        } else {
-            if (isset($_FILES['media_file']) && $_FILES['media_file']['error'] !== UPLOAD_ERR_NO_FILE) {
-                if ($_FILES['media_file']['error'] !== UPLOAD_ERR_OK) {
-                    $error = 'Unable to upload file. Please try again.';
-                } else {
-                    $ext = strtolower(pathinfo($_FILES['media_file']['name'], PATHINFO_EXTENSION));
-                    $allowed = $mediaType === 'photo'
-                        ? ['jpg','jpeg','png','gif','webp']
-                        : ['mp4','mov','m4v','webm','ogv','ogg'];
-
-                    if (!in_array($ext, $allowed, true)) {
-                        $error = $mediaType === 'photo'
-                            ? 'Please upload a JPG, PNG, GIF, or WEBP image.'
-                            : 'Please upload an MP4, MOV, M4V, WEBM, or OGG video.';
-                    } else {
-                        $uploadDir = __DIR__ . '/uploads/blogs/';
-                        if (!is_dir($uploadDir)) {
-                            mkdir($uploadDir, 0755, true);
-                        }
-                        $prefix = $mediaType === 'video' ? 'video_' : 'blog_';
-                        $filename = uniqid($prefix, true) . '.' . $ext;
-                        $destination = $uploadDir . $filename;
-                        if (move_uploaded_file($_FILES['media_file']['tmp_name'], $destination)) {
-                            $mediaUrl = 'uploads/blogs/' . $filename;
-                        } else {
-                            $error = 'Unable to upload file. Please try again.';
-                        }
-                    }
-                }
-            }
-
-            if (!$error && $mediaUrl === '') {
-                $error = 'Provide an image, video link, or upload for this post.';
-            }
-
-            if (!$error) {
-                $sql = 'UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id';
-                $params = [
-                $update = $pdo->prepare('UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, category = :category, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id');
-                $update->execute([
-                    'title' => $title,
-                    'author' => $author,
-                    'summary' => $summary,
-                    'content' => $content,
-                    'media_type' => $mediaType,
-                    'media_url' => $mediaUrl,
-                    'category' => $category,
-                    'status' => $status,
-                    'views' => $views,
-                    'likes' => $likes,
-                    'responses' => $responses,
-                    'id' => $id,
-                ];
-
-                if ($hasCategoryColumn) {
-                    $sql = 'UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, category = :category, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id';
-                    $params['category'] = $category;
-                }
-
-                try {
-                    $update = $pdo->prepare($sql);
-                    $update->execute($params);
-                } catch (PDOException $updateException) {
-                    if ($hasCategoryColumn) {
-                        $hasCategoryColumn = false;
-                        unset($params['category']);
-                        $sql = 'UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id';
-                        $update = $pdo->prepare($sql);
-                        $update->execute($params);
-                    } else {
-                        throw $updateException;
-                    }
-                }
-
-                if ($hasCategoryColumn) {
-                    $sql = 'UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, category = :category, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id';
-                    $params['category'] = $category;
-                }
-
-                $update = $pdo->prepare($sql);
-                $update->execute($params);
-
-                $stmt->execute(['id' => $id]);
-                $post = $stmt->fetch(PDO::FETCH_ASSOC);
-                if ($post && !$hasCategoryColumn) {
-                    $post['category'] = 'general';
-                }
-                if ($post && !$hasStatusColumn) {
-                    $post['status'] = 'published';
-                }
-                $message = 'Blog post updated.';
-            }
+        if (!$err) {
+            $sql = "UPDATE blog_posts SET title=:title,author=:author,summary=:summary,content=:content,
+                    media_type=:media_type,media_url=:media_url,category=:category,status=:status,
+                    views=:views,likes=:likes,responses=:responses,updated_at=NOW()
+                    WHERE id=:id";
+            $upd = $pdo->prepare($sql);
+            $upd->execute([
+                ':title'=>$title, ':author'=>$author, ':summary'=>$summary, ':content'=>$content,
+                ':media_type'=>$mediaType, ':media_url'=>$mediaUrl, ':category'=>$category, ':status'=>$status,
+                ':views'=>$views, ':likes'=>$likes, ':responses'=>$responses, ':id'=>$id
+            ]);
+            $msg = 'Blog post updated.';
+            // refresh
+            $stmt->execute([':id'=>$id]); $post = $stmt->fetch(PDO::FETCH_ASSOC);
         }
     }
-} catch (Throwable $e) {
-    error_log('[blog-edit.php] ' . $e->getMessage());
-    $error = 'Database error: ' . adminEscape($e->getMessage());
-}
+} catch (PDOException $e) { $err = 'Database error: '.htmlspecialchars($e->getMessage()); }
 ?>
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html>
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Edit Blog Post | LevelMinds Admin</title>
-  <link rel="icon" href="assets/images/logo/logo.svg" type="image/svg+xml">
   <link href="assets/vendors/bootstrap/bootstrap.min.css" rel="stylesheet">
   <link href="assets/vendors/bootstrap-icons/font/bootstrap-icons.min.css" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/cropperjs@1.5.13/dist/cropper.min.css" rel="stylesheet">
-  <style>
-    body { background: #f5f7fb; font-family: 'Public Sans', sans-serif; }
-    .admin-shell { max-width: 960px; margin: 0 auto; padding: 32px 16px 96px; }
-    .admin-nav { background: #ffffff; border-radius: 18px; box-shadow: 0 15px 45px rgba(15, 46, 91, 0.12); padding: 18px 28px; margin-bottom: 32px; display: flex; justify-content: space-between; align-items: center; }
-    .admin-nav .brand { display: flex; align-items: center; gap: 12px; color: #0F1D3B; font-weight: 700; text-decoration: none; }
-    .admin-nav nav a { margin-left: 18px; text-decoration: none; color: #51617A; font-weight: 500; }
-    .admin-nav nav a.active, .admin-nav nav a:hover { color: #3C8DFF; }
-    .admin-card { background: #ffffff; border-radius: 18px; box-shadow: 0 20px 60px rgba(15, 46, 91, 0.08); padding: 32px; }
-    textarea.js-rich-editor { min-height: 180px; }
-    .rich-editor { border: 1px solid #dbe4f3; border-radius: 14px; overflow: hidden; background: #ffffff; box-shadow: inset 0 1px 2px rgba(15, 46, 91, 0.06); }
-    .rich-toolbar { display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.45rem 0.55rem; background: #f0f5ff; border-bottom: 1px solid #dbe4f3; }
-    .rich-toolbar button { border: none; background: transparent; color: #405275; border-radius: 8px; width: 2.2rem; height: 2.2rem; display: inline-flex; align-items: center; justify-content: center; font-size: 1rem; transition: background 0.2s ease, color 0.2s ease; }
-    .rich-toolbar button:focus { outline: none; box-shadow: 0 0 0 2px rgba(60, 141, 255, 0.25); }
-    .rich-toolbar button:hover, .rich-toolbar button.is-active { background: rgba(60, 141, 255, 0.12); color: #2a62d5; }
-    .rich-toolbar select { border-radius: 8px; border: 1px solid #c7d3e8; padding: 0.25rem 0.5rem; background: #ffffff; color: #2f3f5d; font-size: 0.85rem; }
-    .rich-content { min-height: 160px; padding: 0.9rem; font-size: 0.98rem; line-height: 1.6; color: #23324d; }
-    .rich-content:focus { outline: none; box-shadow: inset 0 0 0 2px rgba(60, 141, 255, 0.18); }
-    .rich-content[data-empty="true"]::before { content: attr(data-placeholder); color: #8ea2c2; pointer-events: none; }
-    .rich-content a { color: #2a62d5; text-decoration: underline; }
-    .rich-content ul, .rich-content ol { padding-left: 1.25rem; margin-bottom: 0.75rem; }
-    textarea.js-rich-editor.js-rich-source-hidden { display: none !important; }
-  </style>
+  <link href="https://unpkg.com/cropperjs@1.6.2/dist/cropper.min.css" rel="stylesheet">
 </head>
-<body>
-  <div class="admin-shell">
-    <div class="admin-nav">
-      <a href="dashboard.php" class="brand">
-        <img src="assets/images/logo/logo.svg" alt="LevelMinds" height="40">
-        <span>LevelMinds Admin</span>
-      </a>
-      <nav>
-        <a href="dashboard.php">Dashboard</a>
-        <a href="blogs-manage.php" class="active">Manage Blogs</a>
-        <a href="post-blog.php">New Blog</a>
-        <a href="logout.php"><i class="bi bi-box-arrow-right me-1"></i>Logout</a>
-      </nav>
+<body class="p-4">
+<div class="container">
+  <h1 class="h4 mb-3">Edit Blog Post</h1>
+  <?php if ($msg): ?><div class="alert alert-success"><?php echo htmlspecialchars($msg); ?></div><?php endif; ?>
+  <?php if ($err): ?><div class="alert alert-danger"><?php echo htmlspecialchars($err); ?></div><?php endif; ?>
+
+  <form method="post" enctype="multipart/form-data" class="row g-3">
+    <div class="col-12"><label class="form-label">Title *</label><input name="title" class="form-control" value="<?php echo htmlspecialchars($post['title']); ?>" required></div>
+    <div class="col-md-3"><label class="form-label">Author</label><input name="author" class="form-control" value="<?php echo htmlspecialchars($post['author']); ?>"></div>
+    <div class="col-md-3"><label class="form-label">Audience *</label>
+      <select name="category" class="form-select">
+        <option value="teachers" <?php echo ($post['category']==='teachers'?'selected':''); ?>>For Teachers</option>
+        <option value="schools" <?php echo ($post['category']==='schools'?'selected':''); ?>>For Schools</option>
+        <option value="general" <?php echo ($post['category']==='general'?'selected':''); ?>>General Insights</option>
+      </select>
+    </div>
+    <div class="col-md-3"><label class="form-label">Type *</label>
+      <select name="media_type" class="form-select">
+        <option value="photo" <?php echo ($post['media_type']==='photo'?'selected':''); ?>>Photo</option>
+        <option value="video" <?php echo ($post['media_type']==='video'?'selected':''); ?>>Video</option>
+      </select>
+    </div>
+    <div class="col-md-3"><label class="form-label">Status *</label>
+      <select name="status" class="form-select">
+        <option value="published" <?php echo ($post['status']==='published'?'selected':''); ?>>Published</option>
+        <option value="draft" <?php echo ($post['status']==='draft'?'selected':''); ?>>Draft</option>
+      </select>
     </div>
 
-    <div class="admin-card">
-      <h1 class="h4 mb-3" style="font-weight: 700; color: #0F1D3B;">Edit blog post</h1>
-      <?php if ($message): ?><div class="alert alert-success"><?php echo adminEscape($message); ?></div><?php endif; ?>
-      <?php if ($error): ?><div class="alert alert-danger"><?php echo adminEscape($error); ?></div><?php endif; ?>
-
-      <form method="POST" class="row g-4" enctype="multipart/form-data" data-blog-form>
-        <div class="col-12">
-          <label class="form-label fw-semibold">Title *</label>
-          <input type="text" name="title" class="form-control" value="<?php echo adminEscape($post['title']); ?>" required>
-        </div>
-        <div class="col-md-3">
-          <label class="form-label fw-semibold">Author</label>
-          <input type="text" name="author" class="form-control" value="<?php echo adminEscape($post['author']); ?>">
-        </div>
-        <div class="col-md-3">
-          <label class="form-label fw-semibold">Audience Category *</label>
-          <?php $currentCategory = $post['category'] ?? 'general'; ?>
-          <?php if ($hasCategoryColumn): ?>
-          <select name="category" class="form-select" required>
-            <option value="teachers" <?php echo $currentCategory === 'teachers' ? 'selected' : ''; ?>>For Teachers</option>
-            <option value="schools" <?php echo $currentCategory === 'schools' ? 'selected' : ''; ?>>For Schools</option>
-            <option value="general" <?php echo $currentCategory === 'general' ? 'selected' : ''; ?>>General Insights</option>
-          </select>
-          <?php else: ?>
-          <input type="hidden" name="category" value="general">
-          <div class="form-text text-muted">Categories will default to General until the database is updated.</div>
-          <?php endif; ?>
-        </div>
-        <div class="col-md-3">
-          <label class="form-label fw-semibold">Audience Category *</label>
-          <?php $currentCategory = $post['category'] ?? 'general'; ?>
-          <?php if ($hasCategoryColumn): ?>
-          <select name="category" class="form-select" required>
-            <option value="teachers" <?php echo $currentCategory === 'teachers' ? 'selected' : ''; ?>>For Teachers</option>
-            <option value="schools" <?php echo $currentCategory === 'schools' ? 'selected' : ''; ?>>For Schools</option>
-            <option value="general" <?php echo $currentCategory === 'general' ? 'selected' : ''; ?>>General Insights</option>
-          </select>
-          <?php else: ?>
-          <input type="hidden" name="category" value="general">
-          <div class="form-text text-muted">Categories will default to General until the database is updated.</div>
-          <?php endif; ?>
-        </div>
-        <div class="col-md-3">
-          <label class="form-label fw-semibold">Audience Category *</label>
-          <?php $currentCategory = $post['category'] ?? 'general'; ?>
-          <?php if ($hasCategoryColumn): ?>
-          <select name="category" class="form-select" required>
-            <option value="teachers" <?php echo $currentCategory === 'teachers' ? 'selected' : ''; ?>>For Teachers</option>
-            <option value="schools" <?php echo $currentCategory === 'schools' ? 'selected' : ''; ?>>For Schools</option>
-            <option value="general" <?php echo $currentCategory === 'general' ? 'selected' : ''; ?>>General Insights</option>
-          </select>
-          <?php else: ?>
-          <input type="hidden" name="category" value="general">
-          <div class="form-text text-muted">Categories will default to General until the database is updated.</div>
-          <?php endif; ?>
-        </div>
-        <div class="col-md-3">
-          <label class="form-label fw-semibold">Audience Category *</label>
-          <?php $currentCategory = $post['category'] ?? 'general'; ?>
-          <?php if ($hasCategoryColumn): ?>
-          <select name="category" class="form-select" required>
-            <option value="teachers" <?php echo $currentCategory === 'teachers' ? 'selected' : ''; ?>>For Teachers</option>
-            <option value="schools" <?php echo $currentCategory === 'schools' ? 'selected' : ''; ?>>For Schools</option>
-            <option value="general" <?php echo $currentCategory === 'general' ? 'selected' : ''; ?>>General Insights</option>
-          </select>
-          <?php else: ?>
-          <input type="hidden" name="category" value="general">
-          <div class="form-text text-muted">Categories will default to General until the database is updated.</div>
-          <?php endif; ?>
-        </div>
-        <div class="col-md-3">
-          <label class="form-label fw-semibold">Blog Type *</label>
-          <select name="media_type" class="form-select" required>
-            <option value="photo" <?php echo $post['media_type'] === 'photo' ? 'selected' : ''; ?>>Photo Blog</option>
-            <option value="video" <?php echo $post['media_type'] === 'video' ? 'selected' : ''; ?>>Video Blog</option>
-          </select>
-        </div>
-        <?php if ($hasStatusColumn): ?>
-        <div class="col-md-3">
-          <label class="form-label fw-semibold">Status *</label>
-          <select name="status" class="form-select" required>
-            <option value="published" <?php echo ($post['status'] ?? 'published') === 'published' ? 'selected' : ''; ?>>Published</option>
-            <option value="draft" <?php echo ($post['status'] ?? 'published') === 'draft' ? 'selected' : ''; ?>>Draft</option>
-          </select>
-        </div>
-        <?php else: ?>
-        <input type="hidden" name="status" value="published">
-        <?php endif; ?>
-        <div class="col-12">
-          <label class="form-label fw-semibold">Image or Video URL *</label>
-          <input type="url" name="media_url" class="form-control" value="<?php echo adminEscape($post['media_url']); ?>" placeholder="https://...">
-          <small class="text-muted">Provide a hosted image or video URL (e.g. CDN, YouTube). Uploading a file below will override this field.</small>
-        </div>
-        <div class="col-12" data-media-field>
-          <label class="form-label fw-semibold">Upload new media file (optional)</label>
-          <div class="d-flex flex-column flex-md-row gap-3 align-items-stretch">
-            <div class="flex-grow-1">
-              <input type="file" name="media_file" class="form-control" accept="image/*,video/*" data-media-input>
-              <small class="text-muted d-block mt-1">Supported formats: JPG, JPEG, PNG, GIF, WEBP, MP4, MOV, M4V, WEBM, OGG.</small>
-              <button type="button" class="btn btn-outline-primary btn-sm mt-3 d-none" data-open-crop>
-                <i class="bi bi-sliders"></i> Adjust crop &amp; size
-              </button>
-            </div>
-            <div class="flex-shrink-0 w-100" data-media-preview style="max-width: 320px;">
-              <?php if ($post['media_type'] === 'photo' && $post['media_url']): ?>
-                <img src="<?php echo htmlspecialchars($post['media_url']); ?>" alt="Current image" class="rounded border w-100" style="max-height: 180px; object-fit: cover;">
-              <?php elseif ($post['media_type'] === 'video' && $post['media_url']): ?>
-                <?php if (filter_var($post['media_url'], FILTER_VALIDATE_URL)): ?>
-                  <div class="ratio ratio-16x9 border rounded overflow-hidden">
-                    <iframe src="<?php echo htmlspecialchars($post['media_url']); ?>" title="Current video" allowfullscreen></iframe>
-                  </div>
-                <?php else: ?>
-                  <video controls class="rounded border w-100" style="max-height: 180px; object-fit: cover;">
-                    <source src="<?php echo htmlspecialchars($post['media_url']); ?>">
-                    Your browser does not support the video tag.
-                  </video>
-                <?php endif; ?>
-              <?php else: ?>
-                <div class="border rounded d-flex align-items-center justify-content-center text-muted bg-light-subtle p-3" style="min-height: 160px;">
-                  <span class="small">No media selected yet.</span>
-                </div>
-              <?php endif; ?>
-            </div>
-          </div>
-        </div>
-        <div class="col-12">
-          <label class="form-label fw-semibold">Short Summary *</label>
-          <textarea name="summary" class="form-control js-rich-editor" rows="2" placeholder="Write a short summary that appears on the blog card." required><?php echo htmlspecialchars_decode($post['summary'] ?? '', ENT_QUOTES); ?></textarea>
-        </div>
-        <div class="col-12">
-          <label class="form-label fw-semibold">Main Content *</label>
-          <textarea name="content" class="form-control js-rich-editor" rows="8" placeholder="Share the full story, add headings, and include helpful links." required><?php echo htmlspecialchars_decode($post['content'] ?? '', ENT_QUOTES); ?></textarea>
-          <textarea name="summary" class="form-control js-rich-editor" rows="2" required><?php echo htmlspecialchars_decode($post['summary'] ?? '', ENT_QUOTES); ?></textarea>
-        </div>
-        <div class="col-12">
-          <label class="form-label fw-semibold">Main Content *</label>
-          <textarea name="content" class="form-control js-rich-editor" rows="8" required><?php echo htmlspecialchars_decode($post['content'] ?? '', ENT_QUOTES); ?></textarea>
-        </div>
-        <div class="col-md-4">
-          <label class="form-label fw-semibold">Views</label>
-          <input type="number" name="views" class="form-control" min="0" value="<?php echo (int)$post['views']; ?>">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label fw-semibold">Likes</label>
-          <input type="number" name="likes" class="form-control" min="0" value="<?php echo (int)$post['likes']; ?>">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label fw-semibold">Responses</label>
-          <input type="number" name="responses" class="form-control" min="0" value="<?php echo (int)$post['responses']; ?>">
-        </div>
-        <div class="col-12 d-flex gap-3">
-          <button type="submit" class="btn btn-primary px-4">Save Changes</button>
-          <a href="blogs-manage.php" class="btn btn-outline-secondary">Back to list</a>
-        </div>
-      </form>
+    <div class="col-12"><label class="form-label">Image / Video URL *</label>
+      <input name="media_url" class="form-control" value="<?php echo htmlspecialchars($post['media_url']); ?>">
+      <small class="text-muted">Upload below overrides for photo blogs.</small>
     </div>
-  </div>
 
-  <div data-global-footer></div>
-  <div class="modal fade" id="mediaCropModal" tabindex="-1" aria-labelledby="mediaCropModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-xl modal-dialog-centered">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="mediaCropModalLabel">Fine-tune media</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <div class="row g-4">
-            <div class="col-lg-8">
-              <div class="border rounded position-relative overflow-hidden bg-light-subtle" style="min-height: 360px;">
-                <img src="" alt="Media preview" data-cropper-target class="w-100 h-100" style="object-fit: contain;">
-              </div>
-            </div>
-            <div class="col-lg-4">
-              <div class="mb-3">
-                <label class="form-label fw-semibold">Aspect ratio</label>
-                <select class="form-select" data-aspect-select>
-                  <option value="original">Original</option>
-                  <option value="16:9">16:9 Landscape</option>
-                  <option value="4:3">4:3 Classic</option>
-                  <option value="1:1">1:1 Square</option>
-                  <option value="9:16">9:16 Portrait</option>
-                  <option value="free">Freeform</option>
-                </select>
-              </div>
-              <div class="row g-2">
-                <div class="col-6">
-                  <label class="form-label fw-semibold">Width (px)</label>
-                  <input type="number" class="form-control" min="1" data-output-width>
-                </div>
-                <div class="col-6">
-                  <label class="form-label fw-semibold">Height (px)</label>
-                  <input type="number" class="form-control" min="1" data-output-height>
-                </div>
-              </div>
-              <div class="alert alert-secondary mt-3 py-2 px-3 small mb-2">
-                Original size: <span data-original-size>—</span>
-              </div>
-              <p class="small text-muted mb-2 d-none" data-processing-hint>Large videos may take a minute to process in your browser.</p>
-              <div class="alert alert-danger d-none" data-processing-error></div>
+    <div class="col-12">
+      <label class="form-label">Upload new image (optional)</label>
+      <input type="file" name="media_file" id="imageFile" class="form-control" accept="image/*">
+      <input type="hidden" name="cropped_image" id="croppedImage">
+      <?php if ($post['media_type']==='photo' && $post['media_url']): ?>
+        <div class="mt-2"><img src="<?php echo htmlspecialchars($post['media_url']); ?>" style="max-height:120px;border-radius:12px"></div>
+      <?php endif; ?>
+      <div class="modal fade" id="cropperModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+          <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title">Crop image</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body"><img id="cropperImage" style="max-width:100%"></div>
+            <div class="modal-footer">
+              <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="button" class="btn btn-primary" id="applyCrop">Use cropped</button>
             </div>
           </div>
-        </div>
-        <div class="modal-footer">
-          <div class="me-auto d-flex align-items-center gap-2">
-            <div class="spinner-border spinner-border-sm text-primary d-none" role="status" data-processing-indicator>
-              <span class="visually-hidden">Processing…</span>
-            </div>
-            <span class="small text-muted" data-processing-status></span>
-          </div>
-          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-          <button type="button" class="btn btn-primary" data-apply-crop>Apply adjustments</button>
         </div>
       </div>
     </div>
-  </div>
 
-  <script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
-  <script src="assets/js/footer.js"></script>
-  <script src="https://cdn.tiny.cloud/1/8n6fw6tstamnd3rc1e3gaye4n5f53gfatj9klefklbm7scjm/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
-  <script src="https://cdn.jsdelivr.net/npm/cropperjs@1.5.13/dist/cropper.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.6/dist/ffmpeg.min.js"></script>
-  <script src="assets/js/admin-media-tools.js"></script>
-  <script>
-    document.addEventListener('DOMContentLoaded', function () {
-  <script src="https://cdn.tiny.cloud/1/no-api-key/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
-  <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      if (typeof tinymce === 'undefined') {
-        return;
-      }
+    <div class="col-12"><label class="form-label">Summary *</label>
+      <textarea name="summary" class="form-control" rows="3" required><?php echo $post['summary']; ?></textarea>
+    </div>
+    <div class="col-12"><label class="form-label">Content *</label>
+      <textarea name="content" class="form-control" rows="8" required><?php echo $post['content']; ?></textarea>
+    </div>
 
-      tinymce.init({
-        selector: 'textarea.js-rich-editor',
-        plugins: 'advlist autolink lists link charmap preview anchor searchreplace visualblocks code fullscreen insertdatetime table help wordcount',
-        toolbar: 'undo redo | styles | bold italic underline | alignleft aligncenter alignright alignjustify | bullist numlist outdent indent | link | removeformat | code',
-        menubar: false,
-        branding: false,
-        skin: 'oxide',
-        content_css: 'default',
-        height: 340,
-        resize: true,
-        browser_spellcheck: true,
-        relative_urls: false,
-        remove_script_host: false,
-        convert_urls: false,
-        setup: function (editor) {
-          editor.on('init', function () {
-            editor.getContainer().style.transition = 'box-shadow 0.2s ease';
-          });
-        },
-        content_style: "body { font-family: 'Public Sans', sans-serif; font-size: 16px; line-height: 1.6; color: #23324d; }"
-      });
+    <div class="col-md-4"><label class="form-label">Views</label><input type="number" name="views" value="<?php echo (int)$post['views']; ?>" min="0" class="form-control"></div>
+    <div class="col-md-4"><label class="form-label">Likes</label><input type="number" name="likes" value="<?php echo (int)$post['likes']; ?>" min="0" class="form-control"></div>
+    <div class="col-md-4"><label class="form-label">Responses</label><input type="number" name="responses" value="<?php echo (int)$post['responses']; ?>" min="0" class="form-control"></div>
 
-      document.querySelectorAll('form').forEach(function (form) {
-        form.addEventListener('submit', function () {
-        menubar: false,
-        branding: false,
-        plugins: 'lists link table image media code fullscreen autoresize',
-        toolbar: 'undo redo | blocks | bold italic underline | alignleft aligncenter alignright alignjustify | bullist numlist | link table | removeformat | code fullscreen',
-        min_height: 220,
-        autoresize_bottom_margin: 16,
-        convert_urls: false,
-        setup: (editor) => {
-          editor.on('change keyup setcontent', () => {
-            editor.save();
-          });
-        }
-      });
+    <div class="col-12"><button class="btn btn-primary">Save Changes</button>
+      <a class="btn btn-outline-secondary" href="blogs-manage.php">Back</a>
+    </div>
+  </form>
+</div>
 
-      document.querySelectorAll('form').forEach((form) => {
-        form.addEventListener('submit', () => {
-          if (typeof tinymce !== 'undefined') {
-            tinymce.triggerSave();
-          }
-        });
-      });
-    });
-  </script>
+<script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
+<script src="https://unpkg.com/cropperjs@1.6.2/dist/cropper.min.js"></script>
+<script>
+(() => {
+  const f = document.getElementById('imageFile');
+  const modalEl = document.getElementById('cropperModal');
+  const cropImg = document.getElementById('cropperImage');
+  const out = document.getElementById('croppedImage');
+  let cropper;
+  f.addEventListener('change', e=>{
+    const file = e.target.files[0]; if (!file) return;
+    const url = URL.createObjectURL(file);
+    cropImg.src = url;
+    const m = new bootstrap.Modal(modalEl); m.show();
+    modalEl.addEventListener('shown.bs.modal', ()=>{ cropper = new Cropper(cropImg,{aspectRatio:16/9, viewMode:1}); }, {once:true});
+    modalEl.addEventListener('hidden.bs.modal', ()=>{ cropper?.destroy(); cropper=null; URL.revokeObjectURL(url); }, {once:true});
+  });
+  document.getElementById('applyCrop').addEventListener('click', ()=>{
+    if (!cropper) return;
+    const cnv = cropper.getCroppedCanvas({maxWidth:1600,maxHeight:1600,imageSmoothingQuality:'high'});
+    out.value = cnv.toDataURL('image/jpeg', 0.9);
+    bootstrap.Modal.getInstance(modalEl).hide();
+  });
+})();
+</script>
 </body>
 </html>
-
-
