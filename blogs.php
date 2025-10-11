@@ -10,30 +10,20 @@ $substituteFlag = defined('ENT_SUBSTITUTE') ? ENT_SUBSTITUTE : 0;
 $posts = [];
 $error = '';
 $hasCategoryColumn = false;
-$hasStatusColumn = false;
 
-function blogColumnExists(PDO $pdo, $column)
+function blogCategoryColumnExists(PDO $pdo)
 {
     try {
-        $stmt = $pdo->prepare(
-            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'blog_posts' AND COLUMN_NAME = :column"
-        );
-        $stmt->execute(['column' => $column]);
+        $stmt = $pdo->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'blog_posts' AND COLUMN_NAME = 'category'");
         return (bool) $stmt->fetchColumn();
     } catch (PDOException $e) {
         try {
-            $check = $pdo->prepare("SHOW COLUMNS FROM blog_posts LIKE :column");
-            $check->execute(['column' => $column]);
-            return (bool) $check->fetch(PDO::FETCH_ASSOC);
+            $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
+            return $check && $check->fetch();
         } catch (PDOException $inner) {
             return false;
         }
     }
-}
-
-function blogCategoryColumnExists(PDO $pdo)
-{
-    return blogColumnExists($pdo, 'category');
 }
 
 function ensureBlogCategoryColumn(PDO $pdo)
@@ -78,12 +68,20 @@ function encodeBlogDataAttr($value)
     }
 
     return base64_encode((string) $value);
-}
+}   
 
-function blogEscapeAttr($value)
 {
-    global $substituteFlag;
-    return htmlspecialchars((string) $value, ENT_QUOTES | $substituteFlag, 'UTF-8');
+    try {
+        $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
+        if ($check && $check->fetch()) {
+            return true;
+        }
+
+        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
+        return true;
+    } catch (PDOException $e) {
+        return false;
+    }
 }
 
 try {
@@ -91,47 +89,25 @@ try {
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     ]);
     $hasCategoryColumn = ensureBlogCategoryColumn($pdo);
-    $hasStatusColumn = blogColumnExists($pdo, 'status');
-    $columns = ['id', 'title', 'author', 'summary', 'content', 'media_type', 'media_url', 'created_at', 'views', 'likes'];
+    $columns = 'id, title, author, summary, content, media_type, media_url, created_at, views, likes';
     if ($hasCategoryColumn) {
-        $columns[] = 'category';
+        $columns .= ', category';
     }
-    $columnSql = implode(', ', $columns);
-    $query = "SELECT $columnSql FROM blog_posts";
-    if ($hasStatusColumn) {
-        $query .= " WHERE status = 'published'";
-    }
-    $query .= ' ORDER BY created_at DESC';
 
     try {
-        $stmt = $pdo->query($query);
+        $stmt = $pdo->query("SELECT $columns FROM blog_posts WHERE status = 'published' ORDER BY created_at DESC");
     } catch (PDOException $queryException) {
-        if ($hasCategoryColumn && !blogCategoryColumnExists($pdo)) {
+        if ($hasCategoryColumn) {
             $hasCategoryColumn = false;
-        }
-        if ($hasStatusColumn && !blogColumnExists($pdo, 'status')) {
-            $hasStatusColumn = false;
-        }
-
-        if (!$hasCategoryColumn || !$hasStatusColumn) {
-            $columns = ['id', 'title', 'author', 'summary', 'content', 'media_type', 'media_url', 'created_at', 'views', 'likes'];
-            if ($hasCategoryColumn) {
-                $columns[] = 'category';
-            }
-            $columnSql = implode(', ', $columns);
-            $query = "SELECT $columnSql FROM blog_posts";
-            if ($hasStatusColumn) {
-                $query .= " WHERE status = 'published'";
-            }
-            $query .= ' ORDER BY created_at DESC';
-            $stmt = $pdo->query($query);
+            $stmt = $pdo->query("SELECT id, title, author, summary, content, media_type, media_url, created_at, views, likes FROM blog_posts WHERE status = 'published' ORDER BY created_at DESC");
         } else {
             throw $queryException;
         }
     }
     $posts = deduplicateBlogPosts($stmt->fetchAll(PDO::FETCH_ASSOC));
-} catch (Throwable $e) {
-    error_log('[blogs.php] ' . $e->getMessage());
+    $stmt = $pdo->query("SELECT id, title, author, summary, content, media_type, media_url, category, created_at, views, likes FROM blog_posts WHERE status = 'published' ORDER BY created_at DESC");
+    $posts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
     $error = 'Unable to load blog posts right now.';
 }
 
@@ -170,12 +146,11 @@ function formatBlogDate($value)
 
 function decodeBlogPlain($value)
 {
-    global $html5Flag;
     if ($value === null || $value === '') {
         return '';
     }
 
-    return trim(html_entity_decode(strip_tags((string) $value), ENT_QUOTES | $html5Flag, 'UTF-8'));
+    return trim(html_entity_decode(strip_tags((string) $value), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
 }
 
 function buildBlogShareUrl($postId)
@@ -202,6 +177,7 @@ $audienceLabels = [
 $groupedPosts = [];
 foreach ($posts as $post) {
     $category = $hasCategoryColumn ? ($post['category'] ?? 'general') : 'general';
+    $category = $post['category'] ?? 'general';
     if (!isset($groupedPosts[$category])) {
         $groupedPosts[$category] = [];
     }
@@ -211,6 +187,7 @@ foreach ($posts as $post) {
 if ($featured) {
     $featuredId = (int)($featured['id'] ?? 0);
     $featuredCategory = $hasCategoryColumn ? ($featured['category'] ?? 'general') : 'general';
+    $featuredCategory = $featured['category'] ?? 'general';
     if ($featuredId && isset($groupedPosts[$featuredCategory])) {
         $groupedPosts[$featuredCategory] = array_values(array_filter(
             $groupedPosts[$featuredCategory],
@@ -285,6 +262,15 @@ foreach ($availableCategories as $category) {
     .hero-feature-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; color: #51617A; font-size: 0.95rem; }
     .hero-feature-meta span { display: inline-flex; align-items: center; gap: 0.35rem; }
     .hero-empty { border-radius: 24px; background: rgba(255,255,255,0.9); padding: 3rem; text-align: center; box-shadow: 0 16px 40px rgba(15,29,59,0.12); color: #51617A; }
+    .blog-hero { padding: 140px 0 80px; }
+    .blog-hero h1 { font-size: 3.5rem; font-weight: 800; color: #0F1D3B; }
+    .blog-hero p.lead { color: rgba(15, 29, 59, 0.72); max-width: 720px; margin: 0 auto; }
+
+    .featured-card { border-radius: 28px; overflow: hidden; background: linear-gradient(135deg, rgba(255,255,255,0.95), #F5FAFF); box-shadow: 0 32px 80px rgba(32, 139, 255, 0.18); }
+    .featured-card__media { position: relative; min-height: 320px; }
+    .featured-card__body { padding: 2.75rem; }
+    .featured-meta { display: flex; flex-wrap: wrap; gap: 1rem; color: #51617A; font-size: 0.95rem; }
+    .featured-meta span { display: inline-flex; align-items: center; gap: 0.35rem; }
 
     .blog-section-heading { font-weight: 700; color: #0F1D3B; }
     .blog-filter { gap: 0.75rem; overflow-x: auto; padding-bottom: 0.5rem; }
@@ -300,6 +286,7 @@ foreach ($availableCategories as $category) {
     .blog-card__title { font-size: 1.25rem; font-weight: 700; color: #0F1D3B; }
     .blog-card__summary { color: #51617A; font-size: 0.98rem; }
     .blog-card__footer { padding: 0 1.8rem 1.8rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: #51617A; font-size: 0.9rem; }
+    .blog-card__footer { padding: 0 1.8rem 1.8rem; display: flex; align-items: center; justify-content: space-between; color: #51617A; font-size: 0.9rem; }
     .btn-like { background: transparent; border: none; color: #51617A; display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600; cursor: pointer; transition: color 0.2s ease; }
     .btn-like .bi { font-size: 1.1rem; }
     .btn-like:hover, .btn-like.liked { color: #e6397f; }
@@ -326,6 +313,8 @@ foreach ($availableCategories as $category) {
       .blog-hero { padding: 120px 0 60px; }
       .blog-hero h1 { font-size: 2.8rem; }
       .hero-feature-body { padding: 1.75rem; }
+      .blog-hero h1 { font-size: 2.75rem; }
+      .featured-card__body { padding: 2rem; }
       .blog-card__body { padding: 1.5rem; }
       .blog-card__footer { padding: 0 1.5rem 1.5rem; }
     }
@@ -398,6 +387,13 @@ foreach ($availableCategories as $category) {
               <a href="#blog-categories" class="btn btn-primary btn-lg px-4">Discover Stories</a>
               <a href="#newsletter" class="btn btn-outline-primary btn-lg px-4">Subscribe</a>
             </div>
+      <div class="row justify-content-center">
+        <div class="col-lg-9 text-center">
+          <h1 class="mb-3">LevelMinds Blog</h1>
+          <p class="lead mb-4">Insights, playbooks, and stories crafted for school leaders and teachers building the future of learning.</p>
+          <div class="d-flex flex-column flex-md-row gap-3 justify-content-center">
+            <a href="#blog-categories" class="btn btn-primary btn-lg px-4">Discover Stories</a>
+            <a href="#newsletter" class="btn btn-outline-primary btn-lg px-4">Subscribe</a>
           </div>
         </div>
         <div class="col-lg-7">
@@ -427,21 +423,22 @@ foreach ($availableCategories as $category) {
               $featuredSummaryEncoded = encodeBlogDataAttr($featuredSummaryRaw);
               $featuredContentEncoded = encodeBlogDataAttr($featuredContentRaw);
               $featuredShareSummaryEncoded = encodeBlogDataAttr($featuredShareSummary);
+              $featuredSummaryPlain = trim(strip_tags($featured['summary'] ?? ''));
               $isFeaturedExternal = $featured['media_type'] === 'video' ? preg_match('/^https?:\/\//i', $featured['media_url']) : false;
             ?>
             <article class="hero-feature">
               <div class="hero-feature-media">
                 <?php if ($featured['media_type'] === 'video'): ?>
                   <?php if ($isFeaturedExternal && !preg_match('/\.(mp4|mov|m4v|webm|ogv|ogg)(\?|$)/i', $featured['media_url'])): ?>
-                    <iframe src="<?php echo blogEscapeAttr($featured['media_url']); ?>" title="<?php echo htmlspecialchars($featured['title']); ?>" allowfullscreen></iframe>
+                    <iframe src="<?php echo htmlspecialchars($featured['media_url']); ?>" title="<?php echo htmlspecialchars($featured['title']); ?>" allowfullscreen></iframe>
                   <?php else: ?>
                     <video class="w-100 h-100" controls>
-                      <source src="<?php echo blogEscapeAttr($featured['media_url']); ?>">
+                      <source src="<?php echo htmlspecialchars($featured['media_url']); ?>">
                       Your browser does not support the video tag.
                     </video>
                   <?php endif; ?>
                 <?php else: ?>
-                  <img src="<?php echo blogEscapeAttr($featured['media_url']); ?>" alt="<?php echo htmlspecialchars($featured['title']); ?>">
+                  <img src="<?php echo htmlspecialchars($featured['media_url']); ?>" alt="<?php echo htmlspecialchars($featured['title']); ?>">
                 <?php endif; ?>
               </div>
               <div class="hero-feature-body">
@@ -457,36 +454,48 @@ foreach ($availableCategories as $category) {
                   <button class="btn-share" type="button"
                     data-share-btn
                     data-post-id="<?php echo $featuredId; ?>"
-                    data-share-url="<?php echo blogEscapeAttr($featuredShareUrl); ?>"
-                    data-share-title="<?php echo blogEscapeAttr($featured['title']); ?>"
-                    data-share-summary="<?php echo blogEscapeAttr($featuredShareSummary); ?>"
-                    data-share-summary-b64="<?php echo blogEscapeAttr($featuredShareSummaryEncoded); ?>">
+                    data-share-url="<?php echo htmlspecialchars($featuredShareUrl, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-share-title="<?php echo htmlspecialchars($featured['title']); ?>"
+                    data-share-summary="<?php echo htmlspecialchars($featuredShareSummary, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-share-summary-b64="<?php echo htmlspecialchars($featuredShareSummaryEncoded, ENT_QUOTES | ENT_SUBSTITUTE); ?>">
                     <i class="bi bi-share"></i> Share
                   </button>
                 </div>
                 <div class="d-flex flex-wrap align-items-center gap-3">
                   <button type="button" class="btn btn-primary px-4" data-bs-toggle="modal" data-bs-target="#blogModal"
                     data-id="<?php echo $featuredId; ?>"
-                    data-title="<?php echo blogEscapeAttr($featured['title']); ?>"
-                    data-author="<?php echo blogEscapeAttr($featured['author']); ?>"
+                  <span><i class="bi bi-eye"></i> <span data-views-for="<?php echo (int)$featured['id']; ?>"><?php echo number_format($featuredViews); ?></span> views</span>
+                </div>
+                <div class="d-flex flex-wrap align-items-center gap-3">
+                  <button type="button" class="btn btn-primary px-4" data-bs-toggle="modal" data-bs-target="#blogModal"
+                    data-id="<?php echo (int)$featured['id']; ?>"
+                    data-title="<?php echo htmlspecialchars($featured['title']); ?>"
+                    data-author="<?php echo htmlspecialchars($featured['author']); ?>"
                     data-date="<?php echo $featuredDate; ?>"
-                    data-category="<?php echo blogEscapeAttr($featuredCategory); ?>"
-                    data-category-label="<?php echo blogEscapeAttr($featuredLabel); ?>"
+                    data-category="<?php echo htmlspecialchars($featuredCategory); ?>"
+                    data-category-label="<?php echo htmlspecialchars($featuredLabel); ?>"
                     data-views="<?php echo $featuredViews; ?>"
                     data-likes="<?php echo $featuredLikes; ?>"
-                    data-summary="<?php echo blogEscapeAttr($featuredSummaryRaw); ?>"
-                    data-summary-b64="<?php echo blogEscapeAttr($featuredSummaryEncoded); ?>"
-                    data-content="<?php echo blogEscapeAttr($featuredContentRaw); ?>"
-                    data-content-b64="<?php echo blogEscapeAttr($featuredContentEncoded); ?>"
-                    data-media-type="<?php echo blogEscapeAttr($featured['media_type']); ?>"
-                    data-media-url="<?php echo blogEscapeAttr($featured['media_url'] ?? ''); ?>"
-                    data-share-url="<?php echo blogEscapeAttr($featuredShareUrl); ?>"
-                    data-share-title="<?php echo blogEscapeAttr($featured['title']); ?>"
-                    data-share-summary="<?php echo blogEscapeAttr($featuredShareSummary); ?>"
-                    data-share-summary-b64="<?php echo blogEscapeAttr($featuredShareSummaryEncoded); ?>">
+                    data-summary="<?php echo htmlspecialchars($featuredSummaryRaw, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-summary-b64="<?php echo htmlspecialchars($featuredSummaryEncoded, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-content="<?php echo htmlspecialchars($featuredContentRaw, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-content-b64="<?php echo htmlspecialchars($featuredContentEncoded, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-media-type="<?php echo htmlspecialchars($featured['media_type']); ?>"
+                    data-media-url="<?php echo htmlspecialchars($featured['media_url'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-share-url="<?php echo htmlspecialchars($featuredShareUrl, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-share-title="<?php echo htmlspecialchars($featured['title']); ?>"
+                    data-share-summary="<?php echo htmlspecialchars($featuredShareSummary, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-share-summary-b64="<?php echo htmlspecialchars($featuredShareSummaryEncoded, ENT_QUOTES | ENT_SUBSTITUTE); ?>">
                     Read full story
                   </button>
                   <button class="btn-like" type="button" data-like-btn data-post-id="<?php echo $featuredId; ?>">
+                    data-summary="<?php echo htmlspecialchars($featured['summary'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-content="<?php echo htmlspecialchars($featured['content'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-media-type="<?php echo htmlspecialchars($featured['media_type']); ?>"
+                    data-media-url="<?php echo htmlspecialchars($featured['media_url'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>">
+                    Read full story
+                  </button>
+                  <button class="btn-like" type="button" data-like-btn data-post-id="<?php echo (int)$featured['id']; ?>">
                     <i class="bi bi-heart"></i>
                     <span data-like-count><?php echo number_format($featuredLikes); ?></span>
                   </button>
@@ -513,7 +522,7 @@ foreach ($availableCategories as $category) {
         <?php foreach ($orderedCategories as $categoryKey): ?>
           <?php if (empty($groupedPosts[$categoryKey])) { continue; }
           $label = $audienceLabels[$categoryKey] ?? ucfirst($categoryKey); ?>
-          <button type="button" class="btn" data-filter="<?php echo blogEscapeAttr($categoryKey); ?>"><?php echo htmlspecialchars($label); ?></button>
+          <button type="button" class="btn" data-filter="<?php echo htmlspecialchars($categoryKey); ?>"><?php echo htmlspecialchars($label); ?></button>
         <?php endforeach; ?>
       </div>
       <?php $renderedPostIds = []; ?>
@@ -542,23 +551,23 @@ foreach ($availableCategories as $category) {
               $postContentEncoded = encodeBlogDataAttr($postContentRaw);
               $postShareSummaryEncoded = encodeBlogDataAttr($postShareSummary);
             ?>
-            <div class="col-xl-4 col-md-6" data-blog-card data-category="<?php echo blogEscapeAttr($categoryKey); ?>">
+            <div class="col-xl-4 col-md-6" data-blog-card data-category="<?php echo htmlspecialchars($categoryKey); ?>">
               <article class="blog-card h-100 d-flex flex-column">
                 <div class="blog-card__media">
                   <?php if ($post['media_type'] === 'video'): ?>
                     <?php $isExternalVideo = preg_match('/^https?:\/\//i', $post['media_url']); ?>
                     <?php if ($isExternalVideo && !preg_match('/\.(mp4|mov|m4v|webm|ogv|ogg)(\?|$)/i', $post['media_url'])): ?>
                       <div class="ratio ratio-16x9">
-                        <iframe src="<?php echo blogEscapeAttr($post['media_url']); ?>" title="<?php echo htmlspecialchars($post['title']); ?>" allowfullscreen></iframe>
+                        <iframe src="<?php echo htmlspecialchars($post['media_url']); ?>" title="<?php echo htmlspecialchars($post['title']); ?>" allowfullscreen></iframe>
                       </div>
                     <?php else: ?>
                       <video class="w-100" controls style="object-fit: cover; height: 220px;">
-                        <source src="<?php echo blogEscapeAttr($post['media_url']); ?>">
+                        <source src="<?php echo htmlspecialchars($post['media_url']); ?>">
                         Your browser does not support the video tag.
                       </video>
                     <?php endif; ?>
                   <?php else: ?>
-                    <img src="<?php echo blogEscapeAttr($post['media_url']); ?>" alt="<?php echo htmlspecialchars($post['title']); ?>" style="width: 100%; height: 220px; object-fit: cover;">
+                    <img src="<?php echo htmlspecialchars($post['media_url']); ?>" alt="<?php echo htmlspecialchars($post['title']); ?>" style="width: 100%; height: 220px; object-fit: cover;">
                   <?php endif; ?>
                 </div>
                 <div class="blog-card__body">
@@ -572,23 +581,23 @@ foreach ($availableCategories as $category) {
                   <div>
                     <button type="button" class="btn btn-outline-primary px-3" data-bs-toggle="modal" data-bs-target="#blogModal"
                       data-id="<?php echo $postId; ?>"
-                      data-title="<?php echo blogEscapeAttr($post['title']); ?>"
-                      data-author="<?php echo blogEscapeAttr($post['author']); ?>"
+                      data-title="<?php echo htmlspecialchars($post['title']); ?>"
+                      data-author="<?php echo htmlspecialchars($post['author']); ?>"
                       data-date="<?php echo $postDate; ?>"
-                      data-category="<?php echo blogEscapeAttr($categoryKey); ?>"
-                      data-category-label="<?php echo blogEscapeAttr($label); ?>"
+                      data-category="<?php echo htmlspecialchars($categoryKey); ?>"
+                      data-category-label="<?php echo htmlspecialchars($label); ?>"
                       data-views="<?php echo $postViews; ?>"
                       data-likes="<?php echo $postLikes; ?>"
-                      data-summary="<?php echo blogEscapeAttr($postSummary); ?>"
-                      data-summary-b64="<?php echo blogEscapeAttr($postSummaryEncoded); ?>"
-                      data-content="<?php echo blogEscapeAttr($postContentRaw); ?>"
-                      data-content-b64="<?php echo blogEscapeAttr($postContentEncoded); ?>"
-                      data-media-type="<?php echo blogEscapeAttr($post['media_type']); ?>"
-                      data-media-url="<?php echo blogEscapeAttr($post['media_url'] ?? ''); ?>"
-                      data-share-url="<?php echo blogEscapeAttr($postShareUrl); ?>"
-                      data-share-title="<?php echo blogEscapeAttr($post['title']); ?>"
-                      data-share-summary="<?php echo blogEscapeAttr($postShareSummary); ?>"
-                      data-share-summary-b64="<?php echo blogEscapeAttr($postShareSummaryEncoded); ?>">
+                      data-summary="<?php echo htmlspecialchars($postSummary, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                      data-summary-b64="<?php echo htmlspecialchars($postSummaryEncoded, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                      data-content="<?php echo htmlspecialchars($postContentRaw, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                      data-content-b64="<?php echo htmlspecialchars($postContentEncoded, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                      data-media-type="<?php echo htmlspecialchars($post['media_type']); ?>"
+                      data-media-url="<?php echo htmlspecialchars($post['media_url'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                      data-share-url="<?php echo htmlspecialchars($postShareUrl, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                      data-share-title="<?php echo htmlspecialchars($post['title']); ?>"
+                      data-share-summary="<?php echo htmlspecialchars($postShareSummary, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                      data-share-summary-b64="<?php echo htmlspecialchars($postShareSummaryEncoded, ENT_QUOTES | ENT_SUBSTITUTE); ?>">
                       Read article
                     </button>
                   </div>
@@ -599,17 +608,85 @@ foreach ($availableCategories as $category) {
                     <button class="btn-share btn-share--icon" type="button"
                       data-share-btn
                       data-post-id="<?php echo $postId; ?>"
-                      data-share-url="<?php echo blogEscapeAttr($postShareUrl); ?>"
-                      data-share-title="<?php echo blogEscapeAttr($post['title']); ?>"
-                      data-share-summary="<?php echo blogEscapeAttr($postShareSummary); ?>"
-                      data-share-summary-b64="<?php echo blogEscapeAttr($postShareSummaryEncoded); ?>">
+                      data-share-url="<?php echo htmlspecialchars($postShareUrl, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                      data-share-title="<?php echo htmlspecialchars($post['title']); ?>"
+                      data-share-summary="<?php echo htmlspecialchars($postShareSummary, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                      data-share-summary-b64="<?php echo htmlspecialchars($postShareSummaryEncoded, ENT_QUOTES | ENT_SUBSTITUTE); ?>">
                       <i class="bi bi-share"></i>
                     </button>
                     <button class="btn-like" type="button" data-like-btn data-post-id="<?php echo $postId; ?>">
                       <i class="bi bi-heart"></i>
                       <span data-like-count><?php echo number_format($postLikes); ?></span>
                     </button>
+  <section class="py-5">
+    <div class="container">
+      <?php if ($error): ?>
+        <div class="alert alert-danger text-center mb-0"><?php echo htmlspecialchars($error); ?></div>
+      <?php elseif (!$featured): ?>
+        <div class="blog-empty">
+          <i class="bi bi-journal-text display-5 d-block mb-3"></i>
+          <p class="lead">No blog posts yet. Check back soon.</p>
+        </div>
+      <?php else: ?>
+        <?php
+          $featuredCategory = $featured['category'] ?? 'general';
+          $featuredLabel = $audienceLabels[$featuredCategory] ?? ucfirst($featuredCategory);
+          $featuredViews = (int)($featured['views'] ?? 0);
+          $featuredLikes = (int)($featured['likes'] ?? 0);
+          $featuredDate = formatBlogDate($featured['created_at'] ?? null);
+          $featuredSummaryPlain = trim(strip_tags($featured['summary'] ?? ''));
+        ?>
+        <article class="featured-card mb-5">
+          <div class="row g-0 align-items-stretch">
+            <div class="col-lg-6 featured-card__media">
+              <?php if ($featured['media_type'] === 'video'): ?>
+                <?php $isFeaturedExternal = preg_match('/^https?:\/\//i', $featured['media_url']); ?>
+                <?php if ($isFeaturedExternal && !preg_match('/\.(mp4|mov|m4v|webm|ogv|ogg)(\?|$)/i', $featured['media_url'])): ?>
+                  <div class="ratio ratio-16x9 h-100">
+                    <iframe src="<?php echo htmlspecialchars($featured['media_url']); ?>" title="<?php echo htmlspecialchars($featured['title']); ?>" allowfullscreen></iframe>
                   </div>
+                <?php else: ?>
+                  <video class="w-100 h-100" controls style="object-fit: cover;">
+                    <source src="<?php echo htmlspecialchars($featured['media_url']); ?>">
+                    Your browser does not support the video tag.
+                  </video>
+                <?php endif; ?>
+              <?php else: ?>
+                <img src="<?php echo htmlspecialchars($featured['media_url']); ?>" alt="<?php echo htmlspecialchars($featured['title']); ?>" class="w-100 h-100" style="object-fit: cover;">
+              <?php endif; ?>
+            </div>
+            <div class="col-lg-6 d-flex align-items-stretch">
+              <div class="featured-card__body d-flex flex-column gap-3 justify-content-center">
+                <div>
+                  <span class="badge bg-primary-subtle text-primary"><?php echo htmlspecialchars($featuredLabel); ?></span>
+                </div>
+                <h2 class="mb-0"><?php echo htmlspecialchars($featured['title']); ?></h2>
+                <p class="lead text-muted mb-0"><?php echo htmlspecialchars($featuredSummaryPlain); ?></p>
+                <div class="featured-meta">
+                  <span><i class="bi bi-person-circle"></i> <?php echo htmlspecialchars($featured['author']); ?></span>
+                  <span><i class="bi bi-calendar-event"></i> <?php echo $featuredDate; ?></span>
+                  <span><i class="bi bi-eye"></i> <span data-views-for="<?php echo (int)$featured['id']; ?>"><?php echo number_format($featuredViews); ?></span> views</span>
+                </div>
+                <div class="d-flex flex-wrap align-items-center gap-3">
+                  <button type="button" class="btn btn-primary px-4" data-bs-toggle="modal" data-bs-target="#blogModal"
+                    data-id="<?php echo (int)$featured['id']; ?>"
+                    data-title="<?php echo htmlspecialchars($featured['title']); ?>"
+                    data-author="<?php echo htmlspecialchars($featured['author']); ?>"
+                    data-date="<?php echo $featuredDate; ?>"
+                    data-category="<?php echo htmlspecialchars($featuredCategory); ?>"
+                    data-category-label="<?php echo htmlspecialchars($featuredLabel); ?>"
+                    data-views="<?php echo $featuredViews; ?>"
+                    data-likes="<?php echo $featuredLikes; ?>"
+                    data-summary="<?php echo htmlspecialchars($featured['summary'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-content="<?php echo htmlspecialchars($featured['content'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-media-type="<?php echo htmlspecialchars($featured['media_type']); ?>"
+                    data-media-url="<?php echo htmlspecialchars($featured['media_url'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>">
+                    Read full story
+                  </button>
+                  <button class="btn-like" type="button" data-like-btn data-post-id="<?php echo (int)$featured['id']; ?>">
+                    <i class="bi bi-heart"></i>
+                    <span data-like-count><?php echo number_format($featuredLikes); ?></span>
+                  </button>
                 </div>
               </article>
             </div>
@@ -661,6 +738,157 @@ foreach ($availableCategories as $category) {
                 <span data-like-count>0</span>
               </button>
             </div>
+          </div>
+          <p class="lead text-muted" data-post-summary></p>
+          <div data-post-content class="mt-3"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section class="section" id="newsletter" style="padding: 80px 0;">
+    <div class="container">
+      <div class="row justify-content-center text-center">
+        <div class="col-lg-7">
+          <h2 style="font-size: 2.5rem; font-weight: 700; color: #1B2A4B;">Get hiring insights in your inbox</h2>
+          <p class="lead mb-4" style="color: #51617A;">Monthly stories on hiring best practices, educator success, and product releases.</p>
+          <form class="d-flex flex-column flex-md-row gap-3 justify-content-center" action="newsletter.php" method="post">
+            <input type="email" class="form-control form-control-lg" name="email" placeholder="Email address" required>
+            <button class="btn btn-primary btn-lg px-4" type="submit">Subscribe</button>
+          </form>
+        </div>
+      </div>
+    </div>
+              </div>
+            </div>
+          </div>
+        </article>
+      <?php endif; ?>
+    </div>
+  </section>
+
+  <?php if ($featured && !empty($groupedPosts)): ?>
+  <section class="py-5" id="blog-categories">
+    <div class="container">
+      <div class="row align-items-center mb-4">
+        <div class="col-lg-8">
+          <h2 class="blog-section-heading mb-2">Discover blogs by categories</h2>
+          <p class="text-muted mb-0">Switch between content designed for teachers and school leaders.</p>
+        </div>
+      </div>
+      <div class="d-flex blog-filter" role="tablist">
+        <button type="button" class="btn active" data-filter="all">Latest articles</button>
+        <?php foreach ($orderedCategories as $categoryKey): ?>
+          <?php if (empty($groupedPosts[$categoryKey])) { continue; }
+          $label = $audienceLabels[$categoryKey] ?? ucfirst($categoryKey); ?>
+          <button type="button" class="btn" data-filter="<?php echo htmlspecialchars($categoryKey); ?>"><?php echo htmlspecialchars($label); ?></button>
+        <?php endforeach; ?>
+      </div>
+      <div class="row g-4 mt-2" id="blogCards">
+        <?php foreach ($orderedCategories as $categoryKey): ?>
+          <?php if (empty($groupedPosts[$categoryKey])) { continue; }
+          $label = $audienceLabels[$categoryKey] ?? ucfirst($categoryKey); ?>
+          <?php foreach ($groupedPosts[$categoryKey] as $post): ?>
+            <?php
+              $postId = (int)$post['id'];
+              $postViews = (int)($post['views'] ?? 0);
+              $postLikes = (int)($post['likes'] ?? 0);
+              $postDate = formatBlogDate($post['created_at'] ?? null);
+              $postSummary = $post['summary'] ?? '';
+              $postSummaryPlain = trim(strip_tags($postSummary));
+            ?>
+            <div class="col-xl-4 col-md-6" data-blog-card data-category="<?php echo htmlspecialchars($categoryKey); ?>">
+              <article class="blog-card h-100 d-flex flex-column">
+                <div class="blog-card__media">
+                  <?php if ($post['media_type'] === 'video'): ?>
+                    <?php $isExternalVideo = preg_match('/^https?:\/\//i', $post['media_url']); ?>
+                    <?php if ($isExternalVideo && !preg_match('/\.(mp4|mov|m4v|webm|ogv|ogg)(\?|$)/i', $post['media_url'])): ?>
+                      <div class="ratio ratio-16x9">
+                        <iframe src="<?php echo htmlspecialchars($post['media_url']); ?>" title="<?php echo htmlspecialchars($post['title']); ?>" allowfullscreen></iframe>
+                      </div>
+                    <?php else: ?>
+                      <video class="w-100" controls style="object-fit: cover; height: 220px;">
+                        <source src="<?php echo htmlspecialchars($post['media_url']); ?>">
+                        Your browser does not support the video tag.
+                      </video>
+                    <?php endif; ?>
+                  <?php else: ?>
+                    <img src="<?php echo htmlspecialchars($post['media_url']); ?>" alt="<?php echo htmlspecialchars($post['title']); ?>" style="width: 100%; height: 220px; object-fit: cover;">
+                  <?php endif; ?>
+                </div>
+                <div class="blog-card__body">
+                  <span class="blog-card__category"><?php echo htmlspecialchars($label); ?></span>
+                  <h3 class="blog-card__title"><?php echo htmlspecialchars($post['title']); ?></h3>
+                  <p class="blog-card__summary mb-0"><?php echo htmlspecialchars($postSummaryPlain); ?></p>
+                  <div class="d-flex flex-wrap gap-3 text-muted small">
+                    <span class="d-inline-flex align-items-center gap-1"><i class="bi bi-person"></i> <?php echo htmlspecialchars($post['author']); ?></span>
+                    <span class="d-inline-flex align-items-center gap-1"><i class="bi bi-calendar-event"></i> <?php echo $postDate; ?></span>
+                  </div>
+                  <div>
+                    <button type="button" class="btn btn-outline-primary px-3" data-bs-toggle="modal" data-bs-target="#blogModal"
+                      data-id="<?php echo $postId; ?>"
+                      data-title="<?php echo htmlspecialchars($post['title']); ?>"
+                      data-author="<?php echo htmlspecialchars($post['author']); ?>"
+                      data-date="<?php echo $postDate; ?>"
+                      data-category="<?php echo htmlspecialchars($categoryKey); ?>"
+                      data-category-label="<?php echo htmlspecialchars($label); ?>"
+                      data-views="<?php echo $postViews; ?>"
+                      data-likes="<?php echo $postLikes; ?>"
+                      data-summary="<?php echo htmlspecialchars($postSummary, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                      data-content="<?php echo htmlspecialchars($post['content'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                      data-media-type="<?php echo htmlspecialchars($post['media_type']); ?>"
+                      data-media-url="<?php echo htmlspecialchars($post['media_url'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>">
+                      Read article
+                    </button>
+                  </div>
+                </div>
+                <div class="blog-card__footer">
+                  <span class="d-inline-flex align-items-center gap-1 text-muted"><i class="bi bi-eye"></i> <span data-views-for="<?php echo $postId; ?>"><?php echo number_format($postViews); ?></span></span>
+                  <button class="btn-like" type="button" data-like-btn data-post-id="<?php echo $postId; ?>">
+                    <i class="bi bi-heart"></i>
+                    <span data-like-count><?php echo number_format($postLikes); ?></span>
+                  </button>
+                </div>
+              </article>
+            </div>
+          <?php endforeach; ?>
+        <?php endforeach; ?>
+      </div>
+    </div>
+  </section>
+  <?php elseif ($featured): ?>
+  <section class="py-5" id="blog-categories">
+    <div class="container">
+      <div class="row justify-content-center text-center">
+        <div class="col-lg-7">
+          <h2 class="blog-section-heading mb-3">More stories coming soon</h2>
+          <p class="text-muted mb-0">We're crafting fresh insights for teachers and school leaders. Check back shortly for new additions.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+  <?php endif; ?>
+
+  <div class="modal fade blog-modal" id="blogModal" tabindex="-1" aria-labelledby="blogModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header align-items-start">
+          <div>
+            <span class="badge bg-primary-subtle text-primary" data-modal-category></span>
+            <h2 class="modal-title h3 mt-2 mb-0" id="blogModalLabel" data-post-title>Blog post</h2>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="blog-modal-media mb-4" data-post-media></div>
+          <div class="blog-modal-meta">
+            <span class="d-inline-flex align-items-center gap-2"><i class="bi bi-person-circle"></i> <span data-post-author></span></span>
+            <span class="d-inline-flex align-items-center gap-2"><i class="bi bi-calendar-event"></i> <span data-post-date></span></span>
+            <span class="d-inline-flex align-items-center gap-2"><i class="bi bi-eye"></i> <span data-post-views>0</span> views</span>
+            <button class="btn-like ms-auto" type="button" data-like-btn data-modal-like data-post-id="">
+              <i class="bi bi-heart"></i>
+              <span data-like-count>0</span>
+            </button>
           </div>
           <p class="lead text-muted" data-post-summary></p>
           <div data-post-content class="mt-3"></div>
@@ -784,6 +1012,11 @@ foreach ($availableCategories as $category) {
           return origin + window.location.pathname;
         }
         return origin.replace(/\/$/, '') + '/blogs.php?post=' + postId;
+
+      const decode = (value) => {
+        const textarea = document.createElement('textarea');
+        textarea.innerHTML = value == null ? '' : String(value);
+        return textarea.value;
       };
 
       const renderMedia = (container, type, url, title) => {
@@ -845,6 +1078,23 @@ foreach ($availableCategories as $category) {
         if (!shareSummary) {
           shareSummary = summary;
         }
+
+      modalEl.addEventListener('show.bs.modal', function (event) {
+        const trigger = event.relatedTarget;
+        if (!trigger) {
+          return;
+        }
+
+        const dataset = trigger.dataset;
+        const postId = dataset.id || '';
+        const title = dataset.title || '';
+        const author = dataset.author || '';
+        const date = dataset.date || '';
+        const categoryLabel = dataset.categoryLabel || '';
+        const summary = decode(dataset.summary || '');
+        const content = decode(dataset.content || '');
+        const mediaType = (dataset.mediaType || '').toLowerCase();
+        const mediaUrl = dataset.mediaUrl || '';
         const likes = parseInt(dataset.likes || '0', 10);
         const views = parseInt(dataset.views || '0', 10);
 
@@ -911,6 +1161,34 @@ foreach ($availableCategories as $category) {
             window.history.replaceState({}, '', nextUrl);
           }
         }
+      });
+
+      modalEl.addEventListener('shown.bs.modal', function () {
+        const trigger = modalEl.__relatedTrigger;
+        const postId = modalEl.dataset.postId;
+        if (!postId || !window.LM || typeof window.LM.trackView !== 'function') {
+          return;
+        }
+        const initialViews = trigger ? parseInt(trigger.getAttribute('data-views') || '0', 10) : 0;
+        window.LM.trackView(postId, {
+          initialViews,
+          updateUI: function (latest) {
+            const viewsEl = modalEl.querySelector('[data-post-views]');
+            if (viewsEl) viewsEl.textContent = formatNumber(latest);
+            document.querySelectorAll('[data-views-for="' + postId + '"]').forEach(function (el) {
+              el.textContent = formatNumber(latest);
+            });
+            if (trigger) {
+              trigger.setAttribute('data-views', String(latest));
+            }
+          }
+        });
+      });
+
+      });
+
+      modalEl.addEventListener('hidden.bs.modal', function () {
+        modalEl.__relatedTrigger = null;
       });
 
       modalEl.addEventListener('shown.bs.modal', function () {
