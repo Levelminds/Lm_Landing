@@ -256,6 +256,78 @@ foreach ($availableCategories as $category) {
             <a href="#newsletter" class="btn btn-outline-primary btn-lg px-4">Subscribe</a>
           </div>
         </div>
+        <div class="col-lg-7">
+          <?php if ($error): ?>
+            <div class="hero-empty">
+              <i class="bi bi-exclamation-triangle display-5 d-block mb-3"></i>
+              <p class="lead mb-0"><?php echo htmlspecialchars($error); ?></p>
+            </div>
+          <?php elseif (!$featured): ?>
+            <div class="hero-empty">
+              <i class="bi bi-journal-text display-5 d-block mb-3"></i>
+              <p class="lead mb-0">No blog posts yet. Check back soon.</p>
+            </div>
+          <?php else: ?>
+            <?php
+              $featuredCategory = $hasCategoryColumn ? ($featured['category'] ?? 'general') : 'general';
+              $featuredLabel = $audienceLabels[$featuredCategory] ?? ucfirst($featuredCategory);
+              $featuredViews = (int)($featured['views'] ?? 0);
+              $featuredLikes = (int)($featured['likes'] ?? 0);
+              $featuredDate = formatBlogDate($featured['created_at'] ?? null);
+              $featuredSummaryPlain = trim(strip_tags($featured['summary'] ?? ''));
+              $isFeaturedExternal = $featured['media_type'] === 'video' ? preg_match('/^https?:\/\//i', $featured['media_url']) : false;
+            ?>
+            <article class="hero-feature">
+              <div class="hero-feature-media">
+                <?php if ($featured['media_type'] === 'video'): ?>
+                  <?php if ($isFeaturedExternal && !preg_match('/\.(mp4|mov|m4v|webm|ogv|ogg)(\?|$)/i', $featured['media_url'])): ?>
+                    <iframe src="<?php echo htmlspecialchars($featured['media_url']); ?>" title="<?php echo htmlspecialchars($featured['title']); ?>" allowfullscreen></iframe>
+                  <?php else: ?>
+                    <video class="w-100 h-100" controls>
+                      <source src="<?php echo htmlspecialchars($featured['media_url']); ?>">
+                      Your browser does not support the video tag.
+                    </video>
+                  <?php endif; ?>
+                <?php else: ?>
+                  <img src="<?php echo htmlspecialchars($featured['media_url']); ?>" alt="<?php echo htmlspecialchars($featured['title']); ?>">
+                <?php endif; ?>
+              </div>
+              <div class="hero-feature-body">
+                <div>
+                  <span class="badge bg-primary-subtle text-primary text-uppercase fw-semibold px-3 py-2"><?php echo htmlspecialchars($featuredLabel); ?></span>
+                </div>
+                <h2 class="mb-0"><?php echo htmlspecialchars($featured['title']); ?></h2>
+                <p class="lead text-muted mb-0"><?php echo htmlspecialchars($featuredSummaryPlain); ?></p>
+                <div class="hero-feature-meta">
+                  <span><i class="bi bi-person-circle"></i> <?php echo htmlspecialchars($featured['author']); ?></span>
+                  <span><i class="bi bi-calendar-event"></i> <?php echo $featuredDate; ?></span>
+                  <span><i class="bi bi-eye"></i> <span data-views-for="<?php echo (int)$featured['id']; ?>"><?php echo number_format($featuredViews); ?></span> views</span>
+                </div>
+                <div class="d-flex flex-wrap align-items-center gap-3">
+                  <button type="button" class="btn btn-primary px-4" data-bs-toggle="modal" data-bs-target="#blogModal"
+                    data-id="<?php echo (int)$featured['id']; ?>"
+                    data-title="<?php echo htmlspecialchars($featured['title']); ?>"
+                    data-author="<?php echo htmlspecialchars($featured['author']); ?>"
+                    data-date="<?php echo $featuredDate; ?>"
+                    data-category="<?php echo htmlspecialchars($featuredCategory); ?>"
+                    data-category-label="<?php echo htmlspecialchars($featuredLabel); ?>"
+                    data-views="<?php echo $featuredViews; ?>"
+                    data-likes="<?php echo $featuredLikes; ?>"
+                    data-summary="<?php echo htmlspecialchars($featured['summary'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-content="<?php echo htmlspecialchars($featured['content'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-media-type="<?php echo htmlspecialchars($featured['media_type']); ?>"
+                    data-media-url="<?php echo htmlspecialchars($featured['media_url'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>">
+                    Read full story
+                  </button>
+                  <button class="btn-like" type="button" data-like-btn data-post-id="<?php echo (int)$featured['id']; ?>">
+                    <i class="bi bi-heart"></i>
+                    <span data-like-count><?php echo number_format($featuredLikes); ?></span>
+                  </button>
+                </div>
+              </div>
+            </article>
+          <?php endif; ?>
+        </div>
       </div>
     </div>
   </section>

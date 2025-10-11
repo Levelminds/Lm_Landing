@@ -138,6 +138,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <link rel="icon" href="assets/images/logo/logo.svg" type="image/svg+xml">
   <link href="assets/vendors/bootstrap/bootstrap.min.css" rel="stylesheet">
   <link href="assets/vendors/bootstrap-icons/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/cropperjs@1.5.13/dist/cropper.min.css" rel="stylesheet">
   <style>
     body { background-color: #f5f7fb; font-family: 'Public Sans', sans-serif; }
     .admin-shell { max-width: 960px; margin: 0 auto; padding: 32px 16px 96px; }
@@ -182,7 +183,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       <?php if ($message): ?><div class="alert alert-success"><?php echo htmlspecialchars($message); ?></div><?php endif; ?>
       <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 
-      <form method="POST" class="row g-4" enctype="multipart/form-data">
+      <form method="POST" class="row g-4" enctype="multipart/form-data" data-blog-form>
         <div class="col-12">
           <label class="form-label fw-semibold">Title *</label>
           <input type="text" name="title" class="form-control" required>
@@ -211,10 +212,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           <input type="url" name="media_url" class="form-control" placeholder="https://...">
           <small class="text-muted">Provide a hosted image or video URL (e.g. CDN, YouTube). Uploading a file below will override this field.</small>
         </div>
-        <div class="col-12">
+        <div class="col-12" data-media-field>
           <label class="form-label fw-semibold">Upload media file (optional)</label>
-          <input type="file" name="media_file" class="form-control" accept="image/*,video/*">
-          <small class="text-muted">Supported formats: JPG, JPEG, PNG, GIF, WEBP, MP4, MOV, M4V, WEBM, OGG.</small>
+          <div class="d-flex flex-column flex-md-row gap-3 align-items-stretch">
+            <div class="flex-grow-1">
+              <input type="file" name="media_file" class="form-control" accept="image/*,video/*" data-media-input>
+              <small class="text-muted d-block mt-1">Supported formats: JPG, JPEG, PNG, GIF, WEBP, MP4, MOV, M4V, WEBM, OGG.</small>
+              <button type="button" class="btn btn-outline-primary btn-sm mt-3 d-none" data-open-crop>
+                <i class="bi bi-sliders"></i> Adjust crop &amp; size
+              </button>
+            </div>
+            <div class="flex-shrink-0 w-100" data-media-preview style="max-width: 320px;">
+              <div class="border rounded d-flex align-items-center justify-content-center text-muted bg-light-subtle p-3" style="min-height: 160px;">
+                <span class="small">No media selected yet.</span>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Short Summary *</label>
@@ -244,6 +257,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   </div>
 
   <div data-global-footer></div>
+  <div class="modal fade" id="mediaCropModal" tabindex="-1" aria-labelledby="mediaCropModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="mediaCropModalLabel">Fine-tune media</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-4">
+            <div class="col-lg-8">
+              <div class="border rounded position-relative overflow-hidden bg-light-subtle" style="min-height: 360px;">
+                <img src="" alt="Media preview" data-cropper-target class="w-100 h-100" style="object-fit: contain;">
+              </div>
+            </div>
+            <div class="col-lg-4">
+              <div class="mb-3">
+                <label class="form-label fw-semibold">Aspect ratio</label>
+                <select class="form-select" data-aspect-select>
+                  <option value="original">Original</option>
+                  <option value="16:9">16:9 Landscape</option>
+                  <option value="4:3">4:3 Classic</option>
+                  <option value="1:1">1:1 Square</option>
+                  <option value="9:16">9:16 Portrait</option>
+                  <option value="free">Freeform</option>
+                </select>
+              </div>
+              <div class="row g-2">
+                <div class="col-6">
+                  <label class="form-label fw-semibold">Width (px)</label>
+                  <input type="number" class="form-control" min="1" data-output-width>
+                </div>
+                <div class="col-6">
+                  <label class="form-label fw-semibold">Height (px)</label>
+                  <input type="number" class="form-control" min="1" data-output-height>
+                </div>
+              </div>
+              <div class="alert alert-secondary mt-3 py-2 px-3 small mb-2">
+                Original size: <span data-original-size>—</span>
+              </div>
+              <p class="small text-muted mb-2 d-none" data-processing-hint>Large videos may take a minute to process in your browser.</p>
+              <div class="alert alert-danger d-none" data-processing-error></div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <div class="me-auto d-flex align-items-center gap-2">
+            <div class="spinner-border spinner-border-sm text-primary d-none" role="status" data-processing-indicator>
+              <span class="visually-hidden">Processing…</span>
+            </div>
+            <span class="small text-muted" data-processing-status></span>
+          </div>
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" data-apply-crop>Apply adjustments</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
   <script src="assets/js/footer.js"></script>
   <script src="https://cdn.tiny.cloud/1/no-api-key/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
