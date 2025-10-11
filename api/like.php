@@ -48,22 +48,17 @@ try {
 
   if ($postId <= 0) { throw new Exception('Missing post_id', 400); }
   if ($token === '') { throw new Exception('Missing visitor token', 400); }
-  if (strlen($token) > 64) {
-    $token = substr($token, 0, 64);
-  }
-  if (!preg_match('/^[a-zA-Z0-9_-]+$/', $token)) {
-    $token = preg_replace('/[^a-zA-Z0-9_-]/', '', $token);
-    if ($token === '') {
-      throw new Exception('Invalid visitor token', 400);
-    }
-  }
   if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
     $email = '';
+  if ($postId <= 0 || $token === '') { throw new Exception('Missing post_id or visitor_token', 400); }
+  if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+    throw new Exception('Invalid email address provided', 400);
   }
 
   $pdo->beginTransaction();
 
   $stmt = $pdo->prepare('SELECT id FROM blog_likes WHERE post_id = ? AND visitor_token = ? LIMIT 1');
+  $stmt = $pdo->prepare('SELECT id FROM blog_likes WHERE post_id = ? AND visitor_token = ?');
   $stmt->execute([$postId, $token]);
   $existing = $stmt->fetchColumn();
 

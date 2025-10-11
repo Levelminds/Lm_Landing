@@ -22,30 +22,20 @@ if ($id <= 0) {
 $message = '';
 $error = '';
 $hasCategoryColumn = false;
-$hasStatusColumn = false;
 
-function blogColumnExists(PDO $pdo, $column)
+function blogCategoryColumnExists(PDO $pdo)
 {
     try {
-        $stmt = $pdo->prepare(
-            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'blog_posts' AND COLUMN_NAME = :column"
-        );
-        $stmt->execute(['column' => $column]);
+        $stmt = $pdo->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'blog_posts' AND COLUMN_NAME = 'category'");
         return (bool) $stmt->fetchColumn();
     } catch (PDOException $e) {
         try {
-            $check = $pdo->prepare("SHOW COLUMNS FROM blog_posts LIKE :column");
-            $check->execute(['column' => $column]);
-            return (bool) $check->fetch(PDO::FETCH_ASSOC);
+            $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
+            return $check && $check->fetch();
         } catch (PDOException $inner) {
             return false;
         }
     }
-}
-
-function blogCategoryColumnExists(PDO $pdo)
-{
-    return blogColumnExists($pdo, 'category');
 }
 
 function ensureBlogCategoryColumn(PDO $pdo)
@@ -61,151 +51,19 @@ function ensureBlogCategoryColumn(PDO $pdo)
     }
 
     return blogCategoryColumnExists($pdo);
-}
-
-function adminEscape($value)
+function ensureBlogCategoryColumn(PDO $pdo)
 {
-    global $substituteFlag;
-    return htmlspecialchars((string) $value, ENT_QUOTES | $substituteFlag, 'UTF-8');
-}
-
-function adminDecode($value)
-{
-    global $html5Flag;
-    return html_entity_decode((string) $value, ENT_QUOTES | $html5Flag, 'UTF-8');
-}
-
-function ensureUploadDirectory($path)
-{
-    if (!is_dir($path)) {
-        mkdir($path, 0755, true);
-    }
-}
-
-function createImageFromPath($path, $mime)
-{
-    switch ($mime) {
-        case 'image/jpeg':
-        case 'image/pjpeg':
-            return imagecreatefromjpeg($path);
-        case 'image/png':
-            return imagecreatefrompng($path);
-        case 'image/gif':
-            return imagecreatefromgif($path);
-        case 'image/webp':
-            return function_exists('imagecreatefromwebp') ? imagecreatefromwebp($path) : null;
-        default:
-            return null;
-    }
-}
-
-function saveImageToPath($image, $path, $mime)
-{
-    switch ($mime) {
-        case 'image/jpeg':
-        case 'image/pjpeg':
-            imagejpeg($image, $path, 90);
-            break;
-        case 'image/png':
-            imagepng($image, $path, 6);
-            break;
-        case 'image/gif':
-            imagegif($image, $path);
-            break;
-        case 'image/webp':
-            if (function_exists('imagewebp')) {
-                imagewebp($image, $path, 90);
-            }
-            break;
-    }
-    @chmod($path, 0644);
-}
-
-function adjustImageOrientation($image, $path)
-{
-    if (!function_exists('exif_read_data')) {
-        return $image;
-    }
-
-    $exif = @exif_read_data($path);
-    if (!$exif || !isset($exif['Orientation'])) {
-        return $image;
-    }
-
-    $orientation = (int) $exif['Orientation'];
-    switch ($orientation) {
-        case 3:
-            $rotated = imagerotate($image, 180, 0);
-            break;
-        case 6:
-            $rotated = imagerotate($image, -90, 0);
-            break;
-        case 8:
-            $rotated = imagerotate($image, 90, 0);
-            break;
-        default:
-            $rotated = $image;
-            break;
-    }
-
-    if ($rotated && $rotated !== $image) {
-        imagedestroy($image);
-        return $rotated;
-    }
-
-    return $image;
-}
-
-function resizeImageIfNeeded($path, $mime, $maxWidth = 1600)
-{
-    if (!file_exists($path)) {
-        return;
-    }
-
-    $image = createImageFromPath($path, $mime);
-    if (!$image) {
-        return;
-    }
-
-    $image = adjustImageOrientation($image, $path);
-    $width = imagesx($image);
-    $height = imagesy($image);
-
-    if ($width > $maxWidth) {
-        $ratio = $maxWidth / $width;
-        $newWidth = (int) round($maxWidth);
-        $newHeight = (int) round($height * $ratio);
-        $canvas = imagecreatetruecolor($newWidth, $newHeight);
-
-        if (in_array($mime, ['image/png', 'image/webp', 'image/gif'], true)) {
-            imagealphablending($canvas, false);
-            imagesavealpha($canvas, true);
+    try {
+        $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
+        if ($check && $check->fetch()) {
+            return true;
         }
 
-        imagecopyresampled($canvas, $image, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
-        saveImageToPath($canvas, $path, $mime);
-        imagedestroy($canvas);
-    } else {
-        saveImageToPath($image, $path, $mime);
+        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
+        return true;
+    } catch (PDOException $e) {
+        return false;
     }
-
-    imagedestroy($image);
-}
-
-function detectMimeType($path)
-{
-    if (!is_file($path)) {
-        return null;
-    }
-    if (function_exists('finfo_open')) {
-        $finfo = finfo_open(FILEINFO_MIME_TYPE);
-        if ($finfo) {
-            $mime = finfo_file($finfo, $path);
-            finfo_close($finfo);
-            return $mime ?: null;
-        }
-    }
-    return null;
 }
 
 try {
@@ -214,7 +72,6 @@ try {
     ]);
 
     $hasCategoryColumn = ensureBlogCategoryColumn($pdo);
-    $hasStatusColumn = blogColumnExists($pdo, 'status');
 
     $stmt = $pdo->prepare('SELECT * FROM blog_posts WHERE id = :id LIMIT 1');
     $stmt->execute(['id' => $id]);
@@ -222,9 +79,6 @@ try {
 
     if ($post && !$hasCategoryColumn && !isset($post['category'])) {
         $post['category'] = 'general';
-    }
-    if ($post && !$hasStatusColumn) {
-        $post['status'] = 'published';
     }
 
     if (!$post) {
@@ -240,7 +94,7 @@ try {
         $mediaType = $_POST['media_type'] ?? 'photo';
         $mediaType = $mediaType === 'video' ? 'video' : 'photo';
         $mediaUrl = trim($_POST['media_url'] ?? '');
-        $status = $_POST['status'] ?? ($post['status'] ?? 'published');
+        $status = $_POST['status'] ?? 'published';
         $category = $_POST['category'] ?? ($post['category'] ?? 'general');
         $views = max(0, (int)($_POST['views'] ?? $post['views']));
         $likes = max(0, (int)($_POST['likes'] ?? $post['likes']));
@@ -252,17 +106,9 @@ try {
                 $category = 'general';
             }
         } else {
+        $allowedCategories = ['teachers', 'schools', 'general'];
+        if (!in_array($category, $allowedCategories, true)) {
             $category = 'general';
-        }
-
-        if ($hasStatusColumn) {
-            $status = strtolower(trim($status));
-            $allowedStatuses = ['published', 'draft'];
-            if (!in_array($status, $allowedStatuses, true)) {
-                $status = 'published';
-            }
-        } else {
-            $status = 'published';
         }
 
         if ($title === '' || $summary === '' || $content === '') {
@@ -352,38 +198,48 @@ try {
             }
 
             if (!$error) {
-                $includeCategory = $hasCategoryColumn;
-                $includeStatus = $hasStatusColumn;
-
-                $fields = [
+                $sql = 'UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id';
+                $params = [
+                $update = $pdo->prepare('UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, category = :category, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id');
+                $update->execute([
                     'title' => $title,
                     'author' => $author,
                     'summary' => $summary,
                     'content' => $content,
                     'media_type' => $mediaType,
                     'media_url' => $mediaUrl,
+                    'category' => $category,
+                    'status' => $status,
                     'views' => $views,
                     'likes' => $likes,
                     'responses' => $responses,
+                    'id' => $id,
                 ];
 
-                if ($includeCategory) {
-                    $fields['category'] = $category;
+                if ($hasCategoryColumn) {
+                    $sql = 'UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, category = :category, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id';
+                    $params['category'] = $category;
                 }
 
-                if ($includeStatus) {
-                    $fields['status'] = $status;
+                try {
+                    $update = $pdo->prepare($sql);
+                    $update->execute($params);
+                } catch (PDOException $updateException) {
+                    if ($hasCategoryColumn) {
+                        $hasCategoryColumn = false;
+                        unset($params['category']);
+                        $sql = 'UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id';
+                        $update = $pdo->prepare($sql);
+                        $update->execute($params);
+                    } else {
+                        throw $updateException;
+                    }
                 }
 
-                $setParts = [];
-                foreach (array_keys($fields) as $column) {
-                    $setParts[] = "$column = :$column";
+                if ($hasCategoryColumn) {
+                    $sql = 'UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, category = :category, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id';
+                    $params['category'] = $category;
                 }
-                $setParts[] = 'updated_at = NOW()';
-
-                $sql = 'UPDATE blog_posts SET ' . implode(', ', $setParts) . ' WHERE id = :id';
-                $params = $fields;
-                $params['id'] = $id;
 
                 $update = $pdo->prepare($sql);
                 $update->execute($params);
@@ -400,7 +256,7 @@ try {
             }
         }
     }
-} catch (Exception $e) {
+} catch (Throwable $e) {
     error_log('[blog-edit.php] ' . $e->getMessage());
     $error = 'Database error: ' . adminEscape($e->getMessage());
 }
@@ -424,6 +280,18 @@ try {
     .admin-nav nav a.active, .admin-nav nav a:hover { color: #3C8DFF; }
     .admin-card { background: #ffffff; border-radius: 18px; box-shadow: 0 20px 60px rgba(15, 46, 91, 0.08); padding: 32px; }
     textarea.js-rich-editor { min-height: 180px; }
+    .rich-editor { border: 1px solid #dbe4f3; border-radius: 14px; overflow: hidden; background: #ffffff; box-shadow: inset 0 1px 2px rgba(15, 46, 91, 0.06); }
+    .rich-toolbar { display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.45rem 0.55rem; background: #f0f5ff; border-bottom: 1px solid #dbe4f3; }
+    .rich-toolbar button { border: none; background: transparent; color: #405275; border-radius: 8px; width: 2.2rem; height: 2.2rem; display: inline-flex; align-items: center; justify-content: center; font-size: 1rem; transition: background 0.2s ease, color 0.2s ease; }
+    .rich-toolbar button:focus { outline: none; box-shadow: 0 0 0 2px rgba(60, 141, 255, 0.25); }
+    .rich-toolbar button:hover, .rich-toolbar button.is-active { background: rgba(60, 141, 255, 0.12); color: #2a62d5; }
+    .rich-toolbar select { border-radius: 8px; border: 1px solid #c7d3e8; padding: 0.25rem 0.5rem; background: #ffffff; color: #2f3f5d; font-size: 0.85rem; }
+    .rich-content { min-height: 160px; padding: 0.9rem; font-size: 0.98rem; line-height: 1.6; color: #23324d; }
+    .rich-content:focus { outline: none; box-shadow: inset 0 0 0 2px rgba(60, 141, 255, 0.18); }
+    .rich-content[data-empty="true"]::before { content: attr(data-placeholder); color: #8ea2c2; pointer-events: none; }
+    .rich-content a { color: #2a62d5; text-decoration: underline; }
+    .rich-content ul, .rich-content ol { padding-left: 1.25rem; margin-bottom: 0.75rem; }
+    textarea.js-rich-editor.js-rich-source-hidden { display: none !important; }
   </style>
 </head>
 <body>
@@ -454,6 +322,48 @@ try {
         <div class="col-md-3">
           <label class="form-label fw-semibold">Author</label>
           <input type="text" name="author" class="form-control" value="<?php echo adminEscape($post['author']); ?>">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Audience Category *</label>
+          <?php $currentCategory = $post['category'] ?? 'general'; ?>
+          <?php if ($hasCategoryColumn): ?>
+          <select name="category" class="form-select" required>
+            <option value="teachers" <?php echo $currentCategory === 'teachers' ? 'selected' : ''; ?>>For Teachers</option>
+            <option value="schools" <?php echo $currentCategory === 'schools' ? 'selected' : ''; ?>>For Schools</option>
+            <option value="general" <?php echo $currentCategory === 'general' ? 'selected' : ''; ?>>General Insights</option>
+          </select>
+          <?php else: ?>
+          <input type="hidden" name="category" value="general">
+          <div class="form-text text-muted">Categories will default to General until the database is updated.</div>
+          <?php endif; ?>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Audience Category *</label>
+          <?php $currentCategory = $post['category'] ?? 'general'; ?>
+          <?php if ($hasCategoryColumn): ?>
+          <select name="category" class="form-select" required>
+            <option value="teachers" <?php echo $currentCategory === 'teachers' ? 'selected' : ''; ?>>For Teachers</option>
+            <option value="schools" <?php echo $currentCategory === 'schools' ? 'selected' : ''; ?>>For Schools</option>
+            <option value="general" <?php echo $currentCategory === 'general' ? 'selected' : ''; ?>>General Insights</option>
+          </select>
+          <?php else: ?>
+          <input type="hidden" name="category" value="general">
+          <div class="form-text text-muted">Categories will default to General until the database is updated.</div>
+          <?php endif; ?>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Audience Category *</label>
+          <?php $currentCategory = $post['category'] ?? 'general'; ?>
+          <?php if ($hasCategoryColumn): ?>
+          <select name="category" class="form-select" required>
+            <option value="teachers" <?php echo $currentCategory === 'teachers' ? 'selected' : ''; ?>>For Teachers</option>
+            <option value="schools" <?php echo $currentCategory === 'schools' ? 'selected' : ''; ?>>For Schools</option>
+            <option value="general" <?php echo $currentCategory === 'general' ? 'selected' : ''; ?>>General Insights</option>
+          </select>
+          <?php else: ?>
+          <input type="hidden" name="category" value="general">
+          <div class="form-text text-muted">Categories will default to General until the database is updated.</div>
+          <?php endif; ?>
         </div>
         <div class="col-md-3">
           <label class="form-label fw-semibold">Audience Category *</label>
@@ -504,15 +414,15 @@ try {
             </div>
             <div class="flex-shrink-0 w-100" data-media-preview style="max-width: 320px;">
               <?php if ($post['media_type'] === 'photo' && $post['media_url']): ?>
-                <img src="<?php echo adminEscape($post['media_url']); ?>" alt="Current image" class="rounded border w-100" style="max-height: 180px; object-fit: cover;">
+                <img src="<?php echo htmlspecialchars($post['media_url']); ?>" alt="Current image" class="rounded border w-100" style="max-height: 180px; object-fit: cover;">
               <?php elseif ($post['media_type'] === 'video' && $post['media_url']): ?>
                 <?php if (filter_var($post['media_url'], FILTER_VALIDATE_URL)): ?>
                   <div class="ratio ratio-16x9 border rounded overflow-hidden">
-                    <iframe src="<?php echo adminEscape($post['media_url']); ?>" title="Current video" allowfullscreen></iframe>
+                    <iframe src="<?php echo htmlspecialchars($post['media_url']); ?>" title="Current video" allowfullscreen></iframe>
                   </div>
                 <?php else: ?>
                   <video controls class="rounded border w-100" style="max-height: 180px; object-fit: cover;">
-                    <source src="<?php echo adminEscape($post['media_url']); ?>">
+                    <source src="<?php echo htmlspecialchars($post['media_url']); ?>">
                     Your browser does not support the video tag.
                   </video>
                 <?php endif; ?>
@@ -526,11 +436,16 @@ try {
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Short Summary *</label>
-          <textarea name="summary" class="form-control js-rich-editor" rows="2" placeholder="Write a short summary that appears on the blog card." required><?php echo adminDecode($post['summary'] ?? ''); ?></textarea>
+          <textarea name="summary" class="form-control js-rich-editor" rows="2" placeholder="Write a short summary that appears on the blog card." required><?php echo htmlspecialchars_decode($post['summary'] ?? '', ENT_QUOTES); ?></textarea>
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Main Content *</label>
-          <textarea name="content" class="form-control js-rich-editor" rows="8" placeholder="Share the full story, add headings, and include helpful links." required><?php echo adminDecode($post['content'] ?? ''); ?></textarea>
+          <textarea name="content" class="form-control js-rich-editor" rows="8" placeholder="Share the full story, add headings, and include helpful links." required><?php echo htmlspecialchars_decode($post['content'] ?? '', ENT_QUOTES); ?></textarea>
+          <textarea name="summary" class="form-control js-rich-editor" rows="2" required><?php echo htmlspecialchars_decode($post['summary'] ?? '', ENT_QUOTES); ?></textarea>
+        </div>
+        <div class="col-12">
+          <label class="form-label fw-semibold">Main Content *</label>
+          <textarea name="content" class="form-control js-rich-editor" rows="8" required><?php echo htmlspecialchars_decode($post['content'] ?? '', ENT_QUOTES); ?></textarea>
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Views</label>
@@ -619,6 +534,9 @@ try {
   <script src="assets/js/admin-media-tools.js"></script>
   <script>
     document.addEventListener('DOMContentLoaded', function () {
+  <script src="https://cdn.tiny.cloud/1/no-api-key/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
       if (typeof tinymce === 'undefined') {
         return;
       }
@@ -647,6 +565,22 @@ try {
 
       document.querySelectorAll('form').forEach(function (form) {
         form.addEventListener('submit', function () {
+        menubar: false,
+        branding: false,
+        plugins: 'lists link table image media code fullscreen autoresize',
+        toolbar: 'undo redo | blocks | bold italic underline | alignleft aligncenter alignright alignjustify | bullist numlist | link table | removeformat | code fullscreen',
+        min_height: 220,
+        autoresize_bottom_margin: 16,
+        convert_urls: false,
+        setup: (editor) => {
+          editor.on('change keyup setcontent', () => {
+            editor.save();
+          });
+        }
+      });
+
+      document.querySelectorAll('form').forEach((form) => {
+        form.addEventListener('submit', () => {
           if (typeof tinymce !== 'undefined') {
             tinymce.triggerSave();
           }
