@@ -15,38 +15,66 @@ try {
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
   ]);
 
+  $pdo->exec("CREATE TABLE IF NOT EXISTS blog_likes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    post_id INT NOT NULL,
+    visitor_token VARCHAR(64) NOT NULL,
+    email VARCHAR(255) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_like (post_id, visitor_token),
+    KEY idx_token (visitor_token),
+    KEY idx_email (email),
+    CONSTRAINT fk_blog_likes_post
+      FOREIGN KEY (post_id)
+      REFERENCES blog_posts(id)
+      ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+  // Lightweight migration for older schemas that only stored email
+  $columns = $pdo->query('SHOW COLUMNS FROM blog_likes')->fetchAll(PDO::FETCH_COLUMN);
+  if (!in_array('visitor_token', $columns, true)) {
+    $pdo->exec("ALTER TABLE blog_likes ADD COLUMN visitor_token VARCHAR(64) NOT NULL AFTER post_id");
+    $pdo->exec("UPDATE blog_likes SET visitor_token = SHA2(CONCAT(post_id, ':', email), 256)");
+    $pdo->exec("ALTER TABLE blog_likes MODIFY email VARCHAR(255) NULL");
+    $pdo->exec("ALTER TABLE blog_likes DROP INDEX uniq_like, ADD UNIQUE KEY uniq_like (post_id, visitor_token), ADD KEY idx_token (visitor_token), ADD KEY idx_email (email)");
+  }
+
   $input = json_decode(file_get_contents('php://input'), true);
   if (!$input) { throw new Exception('Invalid payload', 400); }
 
   $postId = isset($input['post_id']) ? (int)$input['post_id'] : 0;
+  $token  = isset($input['visitor_token']) ? trim($input['visitor_token']) : '';
   $email  = isset($input['email']) ? trim($input['email']) : '';
-  if ($postId <= 0 || $email === '') { throw new Exception('Missing post_id or email', 400); }
 
-  // Must be subscribed (active)
-  $stmt = $pdo->prepare("SELECT id FROM newsletter_subscribers WHERE email = ? AND status = 'active'");
-  $stmt->execute([$email]);
-  if (!$stmt->fetchColumn()) {
-    http_response_code(403);
-    echo json_encode(['ok' => false, 'message' => 'Please subscribe to LM Blogs to use the Like feature.']);
-    exit;
+  if ($postId <= 0) { throw new Exception('Missing post_id', 400); }
+  if ($token === '') { throw new Exception('Missing visitor token', 400); }
+  if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+    $email = '';
   }
-
-  // Ensure likes table exists (run once manually in SQL ideally)
-  // CREATE TABLE IF NOT EXISTS blog_likes (id INT AUTO_INCREMENT PRIMARY KEY, post_id INT NOT NULL, email VARCHAR(255) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uniq_like (post_id, email), FOREIGN KEY (post_id) REFERENCES blog_posts(id) ON DELETE CASCADE);
 
   $pdo->beginTransaction();
 
-  // Toggle like
-  $stmt = $pdo->prepare('SELECT id FROM blog_likes WHERE post_id = ? AND email = ?');
-  $stmt->execute([$postId, $email]);
+  $stmt = $pdo->prepare('SELECT id FROM blog_likes WHERE post_id = ? AND visitor_token = ? LIMIT 1');
+  $stmt->execute([$postId, $token]);
   $existing = $stmt->fetchColumn();
+
+  if (!$existing && $email !== '') {
+    $legacyStmt = $pdo->prepare('SELECT id FROM blog_likes WHERE post_id = ? AND email = ? LIMIT 1');
+    $legacyStmt->execute([$postId, $email]);
+    $existing = $legacyStmt->fetchColumn();
+  }
 
   if ($existing) {
     $pdo->prepare('DELETE FROM blog_likes WHERE id = ?')->execute([$existing]);
     $pdo->prepare('UPDATE blog_posts SET likes = GREATEST(likes - 1, 0) WHERE id = ?')->execute([$postId]);
     $liked = false;
   } else {
-    $pdo->prepare('INSERT INTO blog_likes (post_id, email) VALUES (?, ?)')->execute([$postId, $email]);
+    // clean up any stale token-based like for this visitor
+    $cleanup = $pdo->prepare('DELETE FROM blog_likes WHERE post_id = ? AND visitor_token = ?');
+    $cleanup->execute([$postId, $token]);
+
+    $insert = $pdo->prepare('INSERT INTO blog_likes (post_id, visitor_token, email) VALUES (?, ?, ?)');
+    $insert->execute([$postId, $token, $email !== '' ? $email : null]);
     $pdo->prepare('UPDATE blog_posts SET likes = likes + 1 WHERE id = ?')->execute([$postId]);
     $liked = true;
   }
