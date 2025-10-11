@@ -8,86 +8,27 @@ $posts = [];
 $error = '';
 $hasCategoryColumn = false;
 
-function blogCategoryColumnExists(PDO $pdo)
-{
-    try {
-        $stmt = $pdo->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'blog_posts' AND COLUMN_NAME = 'category'");
-        return (bool) $stmt->fetchColumn();
-    } catch (PDOException $e) {
-        try {
-            $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
-            return $check && $check->fetch();
-        } catch (PDOException $inner) {
-            return false;
-        }
-    }
-}
-
 function ensureBlogCategoryColumn(PDO $pdo)
 {
-    if (blogCategoryColumnExists($pdo)) {
-        return true;
-    }
-
     try {
+        $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
+        if ($check && $check->fetch()) {
+            return true;
+        }
+
         $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
+        return true;
     } catch (PDOException $e) {
         return false;
     }
-
-    return blogCategoryColumnExists($pdo);
-}
-
-function deduplicateBlogPosts(array $items)
-{
-    $unique = [];
-    $seen = [];
-
-    foreach ($items as $item) {
-        $id = isset($item['id']) ? (string) $item['id'] : '';
-        $key = $id !== '' ? $id : sha1(json_encode($item));
-
-        if (isset($seen[$key])) {
-            continue;
-        }
-
-        $seen[$key] = true;
-        $unique[] = $item;
-    }
-
-    return array_values($unique);
-}
-
-function encodeBlogDataAttr($value)
-{
-    if ($value === null || $value === '') {
-        return '';
-    }
-
-    return base64_encode((string) $value);
 }
 
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     ]);
-    $hasCategoryColumn = ensureBlogCategoryColumn($pdo);
-    $columns = 'id, title, author, summary, content, media_type, media_url, created_at, views, likes';
-    if ($hasCategoryColumn) {
-        $columns .= ', category';
-    }
-
-    try {
-        $stmt = $pdo->query("SELECT $columns FROM blog_posts WHERE status = 'published' ORDER BY created_at DESC");
-    } catch (PDOException $queryException) {
-        if ($hasCategoryColumn) {
-            $hasCategoryColumn = false;
-            $stmt = $pdo->query("SELECT id, title, author, summary, content, media_type, media_url, created_at, views, likes FROM blog_posts WHERE status = 'published' ORDER BY created_at DESC");
-        } else {
-            throw $queryException;
-        }
-    }
-    $posts = deduplicateBlogPosts($stmt->fetchAll(PDO::FETCH_ASSOC));
+    $stmt = $pdo->query("SELECT id, title, author, summary, content, media_type, media_url, category, created_at, views, likes FROM blog_posts WHERE status = 'published' ORDER BY created_at DESC");
+    $posts = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     $error = 'Unable to load blog posts right now.';
 }
@@ -100,7 +41,6 @@ if (!$posts) {
             $posts = array_values(array_filter($fallbackData, function ($item) {
                 return is_array($item) && isset($item['title'], $item['summary'], $item['media_url']);
             }));
-            $posts = deduplicateBlogPosts($posts);
             usort($posts, function ($a, $b) {
                 return strcmp($b['created_at'] ?? '', $a['created_at'] ?? '');
             });
@@ -125,28 +65,6 @@ function formatBlogDate($value)
     }
 }
 
-function decodeBlogPlain($value)
-{
-    if ($value === null || $value === '') {
-        return '';
-    }
-
-    return trim(html_entity_decode(strip_tags((string) $value), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-}
-
-function buildBlogShareUrl($postId)
-{
-    $postId = (int) $postId;
-    if ($postId <= 0) {
-        return '';
-    }
-
-    $host = $_SERVER['HTTP_HOST'] ?? 'levelminds.in';
-    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-
-    return sprintf('%s://%s/blogs.php?post=%d', $scheme, $host, $postId);
-}
-
 $featured = $posts[0] ?? null;
 
 $audienceLabels = [
@@ -157,7 +75,7 @@ $audienceLabels = [
 
 $groupedPosts = [];
 foreach ($posts as $post) {
-    $category = $hasCategoryColumn ? ($post['category'] ?? 'general') : 'general';
+    $category = $post['category'] ?? 'general';
     if (!isset($groupedPosts[$category])) {
         $groupedPosts[$category] = [];
     }
@@ -166,7 +84,7 @@ foreach ($posts as $post) {
 
 if ($featured) {
     $featuredId = (int)($featured['id'] ?? 0);
-    $featuredCategory = $hasCategoryColumn ? ($featured['category'] ?? 'general') : 'general';
+    $featuredCategory = $featured['category'] ?? 'general';
     if ($featuredId && isset($groupedPosts[$featuredCategory])) {
         $groupedPosts[$featuredCategory] = array_values(array_filter(
             $groupedPosts[$featuredCategory],
@@ -228,19 +146,15 @@ foreach ($availableCategories as $category) {
     .fbs__net-navbar .nav-link:hover,
     .fbs__net-navbar .nav-link.active { color: #3C8DFF !important; }
 
-    .blog-hero { padding: 140px 0 80px; background: radial-gradient(circle at top right, rgba(60, 141, 255, 0.12), transparent 55%), linear-gradient(180deg, rgba(245, 250, 255, 0.35), rgba(245, 250, 255, 0)); }
-    .blog-hero h1 { font-size: 3.4rem; font-weight: 800; color: #0F1D3B; }
-    .blog-hero p.lead { color: rgba(15, 29, 59, 0.72); max-width: 620px; }
-    .hero-highlight { display: flex; flex-direction: column; gap: 1.5rem; }
-    .hero-feature { border-radius: 28px; overflow: hidden; background: #ffffff; box-shadow: 0 28px 80px rgba(32, 139, 255, 0.18); display: flex; flex-direction: column; height: 100%; }
-    .hero-feature-media { position: relative; min-height: 260px; background: #0F1D3B; }
-    .hero-feature-media img,
-    .hero-feature-media video,
-    .hero-feature-media iframe { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .hero-feature-body { padding: 2.25rem; display: flex; flex-direction: column; gap: 1rem; }
-    .hero-feature-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; color: #51617A; font-size: 0.95rem; }
-    .hero-feature-meta span { display: inline-flex; align-items: center; gap: 0.35rem; }
-    .hero-empty { border-radius: 24px; background: rgba(255,255,255,0.9); padding: 3rem; text-align: center; box-shadow: 0 16px 40px rgba(15,29,59,0.12); color: #51617A; }
+    .blog-hero { padding: 140px 0 80px; }
+    .blog-hero h1 { font-size: 3.5rem; font-weight: 800; color: #0F1D3B; }
+    .blog-hero p.lead { color: rgba(15, 29, 59, 0.72); max-width: 720px; margin: 0 auto; }
+
+    .featured-card { border-radius: 28px; overflow: hidden; background: linear-gradient(135deg, rgba(255,255,255,0.95), #F5FAFF); box-shadow: 0 32px 80px rgba(32, 139, 255, 0.18); }
+    .featured-card__media { position: relative; min-height: 320px; }
+    .featured-card__body { padding: 2.75rem; }
+    .featured-meta { display: flex; flex-wrap: wrap; gap: 1rem; color: #51617A; font-size: 0.95rem; }
+    .featured-meta span { display: inline-flex; align-items: center; gap: 0.35rem; }
 
     .blog-section-heading { font-weight: 700; color: #0F1D3B; }
     .blog-filter { gap: 0.75rem; overflow-x: auto; padding-bottom: 0.5rem; }
@@ -255,20 +169,10 @@ foreach ($availableCategories as $category) {
     .blog-card__category { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: #3C8DFF; font-weight: 700; }
     .blog-card__title { font-size: 1.25rem; font-weight: 700; color: #0F1D3B; }
     .blog-card__summary { color: #51617A; font-size: 0.98rem; }
-    .blog-card__footer { padding: 0 1.8rem 1.8rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: #51617A; font-size: 0.9rem; }
+    .blog-card__footer { padding: 0 1.8rem 1.8rem; display: flex; align-items: center; justify-content: space-between; color: #51617A; font-size: 0.9rem; }
     .btn-like { background: transparent; border: none; color: #51617A; display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600; cursor: pointer; transition: color 0.2s ease; }
     .btn-like .bi { font-size: 1.1rem; }
     .btn-like:hover, .btn-like.liked { color: #e6397f; }
-
-    .btn-share { background: #ffffff; border: 1px solid rgba(60, 141, 255, 0.35); border-radius: 999px; color: #3C8DFF; font-weight: 600; padding: 0.45rem 1.1rem; display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer; transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease; }
-    .btn-share:hover { background: #3C8DFF; color: #ffffff; box-shadow: 0 8px 22px rgba(60, 141, 255, 0.25); }
-    .btn-share--icon { padding: 0.4rem; width: 38px; height: 38px; border-radius: 50%; justify-content: center; }
-    .btn-share--icon i { margin: 0; }
-    .hero-feature-meta .btn-share { margin-left: auto; }
-
-    .lm-share-menu { background: #ffffff; border-radius: 14px; padding: 0.5rem; min-width: 210px; box-shadow: 0 20px 45px rgba(15,29,59,0.18); z-index: 1080; }
-    .lm-share-menu__item { border: none; background: transparent; width: 100%; text-align: left; padding: 0.45rem 0.75rem; border-radius: 10px; font-weight: 600; color: #1B2A4B; display: flex; align-items: center; gap: 0.5rem; transition: background 0.2s ease, color 0.2s ease; }
-    .lm-share-menu__item:hover { background: rgba(60, 141, 255, 0.12); color: #0F1D3B; }
 
     .blog-empty { padding: 6rem 0; text-align: center; color: #51617A; }
 
@@ -280,15 +184,14 @@ foreach ($availableCategories as $category) {
 
     @media (max-width: 991.98px) {
       .blog-hero { padding: 120px 0 60px; }
-      .blog-hero h1 { font-size: 2.8rem; }
-      .hero-feature-body { padding: 1.75rem; }
+      .blog-hero h1 { font-size: 2.75rem; }
+      .featured-card__body { padding: 2rem; }
       .blog-card__body { padding: 1.5rem; }
       .blog-card__footer { padding: 0 1.5rem 1.5rem; }
     }
 
     @media (max-width: 575.98px) {
       .blog-hero h1 { font-size: 2.2rem; }
-      .hero-feature-media { min-height: 220px; }
       .blog-card__media img, .blog-card__media video, .blog-card__media iframe { height: 180px; }
     }
   </style>
@@ -344,16 +247,13 @@ foreach ($availableCategories as $category) {
   <main style="padding-top: 110px;">
   <section class="blog-hero">
     <div class="container">
-      <div class="row align-items-center g-5">
-        <div class="col-lg-5">
-          <div class="hero-highlight">
-            <span class="badge bg-primary-subtle text-primary fw-semibold px-3 py-2">LevelMinds Blog</span>
-            <h1 class="mb-0">Stories &amp; strategies for modern learning teams</h1>
-            <p class="lead mb-0">Insights, playbooks, and stories crafted for school leaders and teachers building the future of learning.</p>
-            <div class="d-flex flex-column flex-sm-row gap-3">
-              <a href="#blog-categories" class="btn btn-primary btn-lg px-4">Discover Stories</a>
-              <a href="#newsletter" class="btn btn-outline-primary btn-lg px-4">Subscribe</a>
-            </div>
+      <div class="row justify-content-center">
+        <div class="col-lg-9 text-center">
+          <h1 class="mb-3">LevelMinds Blog</h1>
+          <p class="lead mb-4">Insights, playbooks, and stories crafted for school leaders and teachers building the future of learning.</p>
+          <div class="d-flex flex-column flex-md-row gap-3 justify-content-center">
+            <a href="#blog-categories" class="btn btn-primary btn-lg px-4">Discover Stories</a>
+            <a href="#newsletter" class="btn btn-outline-primary btn-lg px-4">Subscribe</a>
           </div>
         </div>
         <div class="col-lg-7">
@@ -369,20 +269,12 @@ foreach ($availableCategories as $category) {
             </div>
           <?php else: ?>
             <?php
-              $featuredId = (int) ($featured['id'] ?? 0);
               $featuredCategory = $hasCategoryColumn ? ($featured['category'] ?? 'general') : 'general';
               $featuredLabel = $audienceLabels[$featuredCategory] ?? ucfirst($featuredCategory);
               $featuredViews = (int)($featured['views'] ?? 0);
               $featuredLikes = (int)($featured['likes'] ?? 0);
               $featuredDate = formatBlogDate($featured['created_at'] ?? null);
-              $featuredSummaryRaw = (string) ($featured['summary'] ?? '');
-              $featuredContentRaw = (string) ($featured['content'] ?? '');
-              $featuredSummaryPlain = decodeBlogPlain($featuredSummaryRaw);
-              $featuredShareUrl = buildBlogShareUrl($featuredId);
-              $featuredShareSummary = $featuredSummaryPlain !== '' ? $featuredSummaryPlain : decodeBlogPlain($featuredContentRaw);
-              $featuredSummaryEncoded = encodeBlogDataAttr($featuredSummaryRaw);
-              $featuredContentEncoded = encodeBlogDataAttr($featuredContentRaw);
-              $featuredShareSummaryEncoded = encodeBlogDataAttr($featuredShareSummary);
+              $featuredSummaryPlain = trim(strip_tags($featured['summary'] ?? ''));
               $isFeaturedExternal = $featured['media_type'] === 'video' ? preg_match('/^https?:\/\//i', $featured['media_url']) : false;
             ?>
             <article class="hero-feature">
@@ -409,20 +301,11 @@ foreach ($availableCategories as $category) {
                 <div class="hero-feature-meta">
                   <span><i class="bi bi-person-circle"></i> <?php echo htmlspecialchars($featured['author']); ?></span>
                   <span><i class="bi bi-calendar-event"></i> <?php echo $featuredDate; ?></span>
-                  <span><i class="bi bi-eye"></i> <span data-views-for="<?php echo $featuredId; ?>"><?php echo number_format($featuredViews); ?></span> views</span>
-                  <button class="btn-share" type="button"
-                    data-share-btn
-                    data-post-id="<?php echo $featuredId; ?>"
-                    data-share-url="<?php echo htmlspecialchars($featuredShareUrl, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                    data-share-title="<?php echo htmlspecialchars($featured['title']); ?>"
-                    data-share-summary="<?php echo htmlspecialchars($featuredShareSummary, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                    data-share-summary-b64="<?php echo htmlspecialchars($featuredShareSummaryEncoded, ENT_QUOTES | ENT_SUBSTITUTE); ?>">
-                    <i class="bi bi-share"></i> Share
-                  </button>
+                  <span><i class="bi bi-eye"></i> <span data-views-for="<?php echo (int)$featured['id']; ?>"><?php echo number_format($featuredViews); ?></span> views</span>
                 </div>
                 <div class="d-flex flex-wrap align-items-center gap-3">
                   <button type="button" class="btn btn-primary px-4" data-bs-toggle="modal" data-bs-target="#blogModal"
-                    data-id="<?php echo $featuredId; ?>"
+                    data-id="<?php echo (int)$featured['id']; ?>"
                     data-title="<?php echo htmlspecialchars($featured['title']); ?>"
                     data-author="<?php echo htmlspecialchars($featured['author']); ?>"
                     data-date="<?php echo $featuredDate; ?>"
@@ -430,19 +313,13 @@ foreach ($availableCategories as $category) {
                     data-category-label="<?php echo htmlspecialchars($featuredLabel); ?>"
                     data-views="<?php echo $featuredViews; ?>"
                     data-likes="<?php echo $featuredLikes; ?>"
-                    data-summary="<?php echo htmlspecialchars($featuredSummaryRaw, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                    data-summary-b64="<?php echo htmlspecialchars($featuredSummaryEncoded, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                    data-content="<?php echo htmlspecialchars($featuredContentRaw, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                    data-content-b64="<?php echo htmlspecialchars($featuredContentEncoded, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-summary="<?php echo htmlspecialchars($featured['summary'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-content="<?php echo htmlspecialchars($featured['content'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
                     data-media-type="<?php echo htmlspecialchars($featured['media_type']); ?>"
-                    data-media-url="<?php echo htmlspecialchars($featured['media_url'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                    data-share-url="<?php echo htmlspecialchars($featuredShareUrl, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                    data-share-title="<?php echo htmlspecialchars($featured['title']); ?>"
-                    data-share-summary="<?php echo htmlspecialchars($featuredShareSummary, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                    data-share-summary-b64="<?php echo htmlspecialchars($featuredShareSummaryEncoded, ENT_QUOTES | ENT_SUBSTITUTE); ?>">
+                    data-media-url="<?php echo htmlspecialchars($featured['media_url'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>">
                     Read full story
                   </button>
-                  <button class="btn-like" type="button" data-like-btn data-post-id="<?php echo $featuredId; ?>">
+                  <button class="btn-like" type="button" data-like-btn data-post-id="<?php echo (int)$featured['id']; ?>">
                     <i class="bi bi-heart"></i>
                     <span data-like-count><?php echo number_format($featuredLikes); ?></span>
                   </button>
@@ -452,6 +329,84 @@ foreach ($availableCategories as $category) {
           <?php endif; ?>
         </div>
       </div>
+    </div>
+  </section>
+
+  <section class="py-5">
+    <div class="container">
+      <?php if ($error): ?>
+        <div class="alert alert-danger text-center mb-0"><?php echo htmlspecialchars($error); ?></div>
+      <?php elseif (!$featured): ?>
+        <div class="blog-empty">
+          <i class="bi bi-journal-text display-5 d-block mb-3"></i>
+          <p class="lead">No blog posts yet. Check back soon.</p>
+        </div>
+      <?php else: ?>
+        <?php
+          $featuredCategory = $featured['category'] ?? 'general';
+          $featuredLabel = $audienceLabels[$featuredCategory] ?? ucfirst($featuredCategory);
+          $featuredViews = (int)($featured['views'] ?? 0);
+          $featuredLikes = (int)($featured['likes'] ?? 0);
+          $featuredDate = formatBlogDate($featured['created_at'] ?? null);
+          $featuredSummaryPlain = trim(strip_tags($featured['summary'] ?? ''));
+        ?>
+        <article class="featured-card mb-5">
+          <div class="row g-0 align-items-stretch">
+            <div class="col-lg-6 featured-card__media">
+              <?php if ($featured['media_type'] === 'video'): ?>
+                <?php $isFeaturedExternal = preg_match('/^https?:\/\//i', $featured['media_url']); ?>
+                <?php if ($isFeaturedExternal && !preg_match('/\.(mp4|mov|m4v|webm|ogv|ogg)(\?|$)/i', $featured['media_url'])): ?>
+                  <div class="ratio ratio-16x9 h-100">
+                    <iframe src="<?php echo htmlspecialchars($featured['media_url']); ?>" title="<?php echo htmlspecialchars($featured['title']); ?>" allowfullscreen></iframe>
+                  </div>
+                <?php else: ?>
+                  <video class="w-100 h-100" controls style="object-fit: cover;">
+                    <source src="<?php echo htmlspecialchars($featured['media_url']); ?>">
+                    Your browser does not support the video tag.
+                  </video>
+                <?php endif; ?>
+              <?php else: ?>
+                <img src="<?php echo htmlspecialchars($featured['media_url']); ?>" alt="<?php echo htmlspecialchars($featured['title']); ?>" class="w-100 h-100" style="object-fit: cover;">
+              <?php endif; ?>
+            </div>
+            <div class="col-lg-6 d-flex align-items-stretch">
+              <div class="featured-card__body d-flex flex-column gap-3 justify-content-center">
+                <div>
+                  <span class="badge bg-primary-subtle text-primary"><?php echo htmlspecialchars($featuredLabel); ?></span>
+                </div>
+                <h2 class="mb-0"><?php echo htmlspecialchars($featured['title']); ?></h2>
+                <p class="lead text-muted mb-0"><?php echo htmlspecialchars($featuredSummaryPlain); ?></p>
+                <div class="featured-meta">
+                  <span><i class="bi bi-person-circle"></i> <?php echo htmlspecialchars($featured['author']); ?></span>
+                  <span><i class="bi bi-calendar-event"></i> <?php echo $featuredDate; ?></span>
+                  <span><i class="bi bi-eye"></i> <span data-views-for="<?php echo (int)$featured['id']; ?>"><?php echo number_format($featuredViews); ?></span> views</span>
+                </div>
+                <div class="d-flex flex-wrap align-items-center gap-3">
+                  <button type="button" class="btn btn-primary px-4" data-bs-toggle="modal" data-bs-target="#blogModal"
+                    data-id="<?php echo (int)$featured['id']; ?>"
+                    data-title="<?php echo htmlspecialchars($featured['title']); ?>"
+                    data-author="<?php echo htmlspecialchars($featured['author']); ?>"
+                    data-date="<?php echo $featuredDate; ?>"
+                    data-category="<?php echo htmlspecialchars($featuredCategory); ?>"
+                    data-category-label="<?php echo htmlspecialchars($featuredLabel); ?>"
+                    data-views="<?php echo $featuredViews; ?>"
+                    data-likes="<?php echo $featuredLikes; ?>"
+                    data-summary="<?php echo htmlspecialchars($featured['summary'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-content="<?php echo htmlspecialchars($featured['content'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                    data-media-type="<?php echo htmlspecialchars($featured['media_type']); ?>"
+                    data-media-url="<?php echo htmlspecialchars($featured['media_url'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>">
+                    Read full story
+                  </button>
+                  <button class="btn-like" type="button" data-like-btn data-post-id="<?php echo (int)$featured['id']; ?>">
+                    <i class="bi bi-heart"></i>
+                    <span data-like-count><?php echo number_format($featuredLikes); ?></span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+      <?php endif; ?>
     </div>
   </section>
 
@@ -482,14 +437,8 @@ foreach ($availableCategories as $category) {
               $postViews = (int)($post['views'] ?? 0);
               $postLikes = (int)($post['likes'] ?? 0);
               $postDate = formatBlogDate($post['created_at'] ?? null);
-              $postSummary = (string) ($post['summary'] ?? '');
-              $postContentRaw = (string) ($post['content'] ?? '');
-              $postSummaryPlain = decodeBlogPlain($postSummary);
-              $postShareUrl = buildBlogShareUrl($postId);
-              $postShareSummary = $postSummaryPlain !== '' ? $postSummaryPlain : decodeBlogPlain($postContentRaw);
-              $postSummaryEncoded = encodeBlogDataAttr($postSummary);
-              $postContentEncoded = encodeBlogDataAttr($postContentRaw);
-              $postShareSummaryEncoded = encodeBlogDataAttr($postShareSummary);
+              $postSummary = $post['summary'] ?? '';
+              $postSummaryPlain = trim(strip_tags($postSummary));
             ?>
             <div class="col-xl-4 col-md-6" data-blog-card data-category="<?php echo htmlspecialchars($categoryKey); ?>">
               <article class="blog-card h-100 d-flex flex-column">
@@ -529,36 +478,19 @@ foreach ($availableCategories as $category) {
                       data-views="<?php echo $postViews; ?>"
                       data-likes="<?php echo $postLikes; ?>"
                       data-summary="<?php echo htmlspecialchars($postSummary, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                      data-summary-b64="<?php echo htmlspecialchars($postSummaryEncoded, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                      data-content="<?php echo htmlspecialchars($postContentRaw, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                      data-content-b64="<?php echo htmlspecialchars($postContentEncoded, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
+                      data-content="<?php echo htmlspecialchars($post['content'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
                       data-media-type="<?php echo htmlspecialchars($post['media_type']); ?>"
-                      data-media-url="<?php echo htmlspecialchars($post['media_url'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                      data-share-url="<?php echo htmlspecialchars($postShareUrl, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                      data-share-title="<?php echo htmlspecialchars($post['title']); ?>"
-                      data-share-summary="<?php echo htmlspecialchars($postShareSummary, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                      data-share-summary-b64="<?php echo htmlspecialchars($postShareSummaryEncoded, ENT_QUOTES | ENT_SUBSTITUTE); ?>">
+                      data-media-url="<?php echo htmlspecialchars($post['media_url'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>">
                       Read article
                     </button>
                   </div>
                 </div>
                 <div class="blog-card__footer">
                   <span class="d-inline-flex align-items-center gap-1 text-muted"><i class="bi bi-eye"></i> <span data-views-for="<?php echo $postId; ?>"><?php echo number_format($postViews); ?></span></span>
-                  <div class="d-flex align-items-center gap-2">
-                    <button class="btn-share btn-share--icon" type="button"
-                      data-share-btn
-                      data-post-id="<?php echo $postId; ?>"
-                      data-share-url="<?php echo htmlspecialchars($postShareUrl, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                      data-share-title="<?php echo htmlspecialchars($post['title']); ?>"
-                      data-share-summary="<?php echo htmlspecialchars($postShareSummary, ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                      data-share-summary-b64="<?php echo htmlspecialchars($postShareSummaryEncoded, ENT_QUOTES | ENT_SUBSTITUTE); ?>">
-                      <i class="bi bi-share"></i>
-                    </button>
-                    <button class="btn-like" type="button" data-like-btn data-post-id="<?php echo $postId; ?>">
-                      <i class="bi bi-heart"></i>
-                      <span data-like-count><?php echo number_format($postLikes); ?></span>
-                    </button>
-                  </div>
+                  <button class="btn-like" type="button" data-like-btn data-post-id="<?php echo $postId; ?>">
+                    <i class="bi bi-heart"></i>
+                    <span data-like-count><?php echo number_format($postLikes); ?></span>
+                  </button>
                 </div>
               </article>
             </div>
@@ -596,20 +528,10 @@ foreach ($availableCategories as $category) {
             <span class="d-inline-flex align-items-center gap-2"><i class="bi bi-person-circle"></i> <span data-post-author></span></span>
             <span class="d-inline-flex align-items-center gap-2"><i class="bi bi-calendar-event"></i> <span data-post-date></span></span>
             <span class="d-inline-flex align-items-center gap-2"><i class="bi bi-eye"></i> <span data-post-views>0</span> views</span>
-            <div class="ms-auto d-flex align-items-center gap-2">
-              <button class="btn-share btn-share--icon" type="button"
-                data-share-btn
-                data-modal-share
-                data-share-url=""
-                data-share-title=""
-                data-share-summary="">
-                <i class="bi bi-share"></i>
-              </button>
-              <button class="btn-like" type="button" data-like-btn data-modal-like data-post-id="">
-                <i class="bi bi-heart"></i>
-                <span data-like-count>0</span>
-              </button>
-            </div>
+            <button class="btn-like ms-auto" type="button" data-like-btn data-modal-like data-post-id="">
+              <i class="bi bi-heart"></i>
+              <span data-like-count>0</span>
+            </button>
           </div>
           <p class="lead text-muted" data-post-summary></p>
           <div data-post-content class="mt-3"></div>
@@ -665,74 +587,10 @@ foreach ($availableCategories as $category) {
         return;
       }
 
-      const decodeHtml = (value) => {
-        if (value == null) {
-          return '';
-        }
+      const decode = (value) => {
         const textarea = document.createElement('textarea');
-        textarea.innerHTML = String(value);
+        textarea.innerHTML = value == null ? '' : String(value);
         return textarea.value;
-      };
-
-      const decodeBase64 = (value) => {
-        if (!value) {
-          return '';
-        }
-        try {
-          const binary = atob(value);
-          if (window.TextDecoder) {
-            const decoder = new TextDecoder('utf-8', { fatal: false });
-            const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-            return decoder.decode(bytes);
-          }
-          return decodeURIComponent(Array.prototype.map.call(binary, function (char) {
-            return '%' + ('00' + char.charCodeAt(0).toString(16)).slice(-2);
-          }).join(''));
-        } catch (error) {
-          return '';
-        }
-      };
-
-      const encodeBase64 = (value) => {
-        if (!value) {
-          return '';
-        }
-        try {
-          if (window.TextEncoder) {
-            const encoder = new TextEncoder();
-            const bytes = encoder.encode(value);
-            let binary = '';
-            bytes.forEach((byte) => {
-              binary += String.fromCharCode(byte);
-            });
-            return btoa(binary);
-          }
-          return btoa(unescape(encodeURIComponent(value)));
-        } catch (error) {
-          return '';
-        }
-      };
-
-      const readDatasetContent = (dataset, base64Key, fallbackKey) => {
-        if (base64Key && dataset[base64Key]) {
-          const decoded = decodeBase64(dataset[base64Key]);
-          if (decoded !== '') {
-            return decoded;
-          }
-        }
-        if (fallbackKey && dataset[fallbackKey]) {
-          return decodeHtml(dataset[fallbackKey]);
-        }
-        return '';
-      };
-
-      const buildShareUrl = (id) => {
-        const postId = String(id || '').trim();
-        const origin = window.location.origin || (window.location.protocol + '//' + window.location.host);
-        if (!postId) {
-          return origin + window.location.pathname;
-        }
-        return origin.replace(/\/$/, '') + '/blogs.php?post=' + postId;
       };
 
       const renderMedia = (container, type, url, title) => {
@@ -785,15 +643,10 @@ foreach ($availableCategories as $category) {
         const author = dataset.author || '';
         const date = dataset.date || '';
         const categoryLabel = dataset.categoryLabel || '';
-        const summary = readDatasetContent(dataset, 'summaryB64', 'summary');
-        const content = readDatasetContent(dataset, 'contentB64', 'content');
+        const summary = decode(dataset.summary || '');
+        const content = decode(dataset.content || '');
         const mediaType = (dataset.mediaType || '').toLowerCase();
         const mediaUrl = dataset.mediaUrl || '';
-        const shareUrl = dataset.shareUrl || '';
-        let shareSummary = readDatasetContent(dataset, 'shareSummaryB64', 'shareSummary');
-        if (!shareSummary) {
-          shareSummary = summary;
-        }
         const likes = parseInt(dataset.likes || '0', 10);
         const views = parseInt(dataset.views || '0', 10);
 
@@ -809,7 +662,6 @@ foreach ($availableCategories as $category) {
         const mediaEl = modalEl.querySelector('[data-post-media]');
         const categoryEl = modalEl.querySelector('[data-modal-category]');
         const likeBtn = modalEl.querySelector('[data-modal-like]');
-        const shareBtn = modalEl.querySelector('[data-modal-share]');
 
         if (titleEl) titleEl.textContent = title;
         if (authorEl) authorEl.textContent = author || 'LevelMinds Team';
@@ -832,34 +684,10 @@ foreach ($availableCategories as $category) {
             window.LM.hydrateLikes();
           }
         }
-
-        if (shareBtn) {
-          shareBtn.setAttribute('data-post-id', postId);
-          const computedShareUrl = shareUrl || buildShareUrl(postId);
-          const computedShareSummary = shareSummary || summary;
-          shareBtn.setAttribute('data-share-url', computedShareUrl);
-          shareBtn.setAttribute('data-share-title', title);
-          shareBtn.setAttribute('data-share-summary', computedShareSummary);
-          const encoded = encodeBase64(computedShareSummary);
-          if (encoded) {
-            shareBtn.setAttribute('data-share-summary-b64', encoded);
-          } else {
-            shareBtn.removeAttribute('data-share-summary-b64');
-          }
-        }
       });
 
       modalEl.addEventListener('hidden.bs.modal', function () {
         modalEl.__relatedTrigger = null;
-        if (window.history && typeof window.history.replaceState === 'function') {
-          const current = new URL(window.location.href);
-          if (current.searchParams.has('post')) {
-            current.searchParams.delete('post');
-            const nextSearch = current.searchParams.toString();
-            const nextUrl = nextSearch ? `${current.pathname}?${nextSearch}` : current.pathname;
-            window.history.replaceState({}, '', nextUrl);
-          }
-        }
       });
 
       modalEl.addEventListener('shown.bs.modal', function () {
@@ -901,17 +729,6 @@ foreach ($availableCategories as $category) {
           }
         });
       });
-
-      const params = new URLSearchParams(window.location.search);
-      const initialPost = params.get('post');
-      if (initialPost) {
-        const opener = document.querySelector('[data-bs-target="#blogModal"][data-id="' + initialPost + '"]');
-        if (opener) {
-          setTimeout(function () {
-            opener.click();
-          }, 350);
-        }
-      }
     });
   </script>
 </body>

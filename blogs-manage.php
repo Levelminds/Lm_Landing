@@ -13,42 +13,11 @@ $password = 'Levelminds@2024';
 $message = '';
 $error = '';
 $posts = [];
-$hasCategoryColumn = false;
 $audienceLabels = [
     'teachers' => 'For Teachers',
     'schools'  => 'For Schools',
     'general'  => 'General'
 ];
-
-function blogCategoryColumnExists(PDO $pdo)
-{
-    try {
-        $stmt = $pdo->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'blog_posts' AND COLUMN_NAME = 'category'");
-        return (bool) $stmt->fetchColumn();
-    } catch (PDOException $e) {
-        try {
-            $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
-            return $check && $check->fetch();
-        } catch (PDOException $inner) {
-            return false;
-        }
-    }
-}
-
-function ensureBlogCategoryColumn(PDO $pdo)
-{
-    if (blogCategoryColumnExists($pdo)) {
-        return true;
-    }
-
-    try {
-        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
-    } catch (PDOException $e) {
-        return false;
-    }
-
-    return blogCategoryColumnExists($pdo);
-}
 
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
@@ -62,22 +31,7 @@ try {
         $message = 'Blog post deleted.';
     }
 
-    $hasCategoryColumn = ensureBlogCategoryColumn($pdo);
-    $columns = 'id, title, author, media_type, status, created_at, views, likes';
-    if ($hasCategoryColumn) {
-        $columns .= ', category';
-    }
-
-    try {
-        $postsStmt = $pdo->query("SELECT $columns FROM blog_posts ORDER BY created_at DESC");
-    } catch (PDOException $queryException) {
-        if ($hasCategoryColumn) {
-            $hasCategoryColumn = false;
-            $postsStmt = $pdo->query('SELECT id, title, author, media_type, status, created_at, views, likes FROM blog_posts ORDER BY created_at DESC');
-        } else {
-            throw $queryException;
-        }
-    }
+    $postsStmt = $pdo->query('SELECT id, title, author, media_type, category, status, created_at, views, likes FROM blog_posts ORDER BY created_at DESC');
     $posts = $postsStmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     $error = 'Database error: ' . htmlspecialchars($e->getMessage());
@@ -152,7 +106,7 @@ try {
                 </td>
                 <td><span class="badge bg-<?php echo $post['media_type'] === 'video' ? 'info' : 'secondary'; ?>"><?php echo ucfirst($post['media_type']); ?></span></td>
                 <td><?php
-                  $categoryKey = $hasCategoryColumn ? ($post['category'] ?? 'general') : 'general';
+                  $categoryKey = $post['category'] ?? 'general';
                   $label = $audienceLabels[$categoryKey] ?? ucfirst($categoryKey);
                   echo htmlspecialchars($label);
                 ?></td>

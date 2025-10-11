@@ -46,24 +46,15 @@ try {
   $token  = isset($input['visitor_token']) ? trim($input['visitor_token']) : '';
   $email  = isset($input['email']) ? trim($input['email']) : '';
 
-  if ($postId <= 0) { throw new Exception('Missing post_id', 400); }
-  if ($token === '') { throw new Exception('Missing visitor token', 400); }
-  if ($email === '') { throw new Exception('Please subscribe to like this post.', 403); }
-  if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+  if ($postId <= 0 || $token === '') { throw new Exception('Missing post_id or visitor_token', 400); }
+  if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
     throw new Exception('Invalid email address provided', 400);
-  }
-
-  $subscriberStmt = $pdo->prepare('SELECT status FROM newsletter_subscribers WHERE email = ? LIMIT 1');
-  $subscriberStmt->execute([$email]);
-  $subscriber = $subscriberStmt->fetch(PDO::FETCH_ASSOC);
-  if (!$subscriber || strtolower($subscriber['status'] ?? '') !== 'active') {
-    throw new Exception('Only active subscribers can like posts. Please subscribe first.', 403);
   }
 
   $pdo->beginTransaction();
 
-  $stmt = $pdo->prepare('SELECT id FROM blog_likes WHERE post_id = ? AND email = ? LIMIT 1');
-  $stmt->execute([$postId, $email]);
+  $stmt = $pdo->prepare('SELECT id FROM blog_likes WHERE post_id = ? AND visitor_token = ?');
+  $stmt->execute([$postId, $token]);
   $existing = $stmt->fetchColumn();
 
   if ($existing) {
@@ -71,12 +62,8 @@ try {
     $pdo->prepare('UPDATE blog_posts SET likes = GREATEST(likes - 1, 0) WHERE id = ?')->execute([$postId]);
     $liked = false;
   } else {
-    // clean up any stale token-based like for this visitor
-    $cleanup = $pdo->prepare('DELETE FROM blog_likes WHERE post_id = ? AND visitor_token = ?');
-    $cleanup->execute([$postId, $token]);
-
     $insert = $pdo->prepare('INSERT INTO blog_likes (post_id, visitor_token, email) VALUES (?, ?, ?)');
-    $insert->execute([$postId, $token, $email]);
+    $insert->execute([$postId, $token, $email !== '' ? $email : null]);
     $pdo->prepare('UPDATE blog_posts SET likes = likes + 1 WHERE id = ?')->execute([$postId]);
     $liked = true;
   }
