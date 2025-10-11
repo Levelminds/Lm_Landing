@@ -125,7 +125,7 @@ try {
                     'likes' => $likes,
                     'responses' => $responses,
                     'id' => $id,
-                ];
+                ]);
 
                 if ($hasCategoryColumn) {
                     $sql = 'UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, category = :category, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id';
