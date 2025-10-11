@@ -193,6 +193,12 @@ try {
 
                 $stmt->execute(['id' => $id]);
                 $post = $stmt->fetch(PDO::FETCH_ASSOC);
+                if ($post && !$hasCategoryColumn) {
+                    $post['category'] = 'general';
+                }
+                if ($post && !$hasStatusColumn) {
+                    $post['status'] = 'published';
+                }
                 $message = 'Blog post updated.';
             }
         }
@@ -284,13 +290,17 @@ try {
             <option value="video" <?php echo $post['media_type'] === 'video' ? 'selected' : ''; ?>>Video Blog</option>
           </select>
         </div>
+        <?php if ($hasStatusColumn): ?>
         <div class="col-md-3">
           <label class="form-label fw-semibold">Status *</label>
           <select name="status" class="form-select" required>
-            <option value="published" <?php echo $post['status'] === 'published' ? 'selected' : ''; ?>>Published</option>
-            <option value="draft" <?php echo $post['status'] === 'draft' ? 'selected' : ''; ?>>Draft</option>
+            <option value="published" <?php echo ($post['status'] ?? 'published') === 'published' ? 'selected' : ''; ?>>Published</option>
+            <option value="draft" <?php echo ($post['status'] ?? 'published') === 'draft' ? 'selected' : ''; ?>>Draft</option>
           </select>
         </div>
+        <?php else: ?>
+        <input type="hidden" name="status" value="published">
+        <?php endif; ?>
         <div class="col-12">
           <label class="form-label fw-semibold">Image or Video URL *</label>
           <input type="url" name="media_url" class="form-control" value="<?php echo htmlspecialchars($post['media_url']); ?>" placeholder="https://...">
