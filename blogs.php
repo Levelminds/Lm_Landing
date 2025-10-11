@@ -4,20 +4,244 @@ $dbname = 'u420143207_LM_landing';
 $username = 'u420143207_lmlanding';
 $password = 'Levelminds@2024';
 
+$html5Flag = defined('ENT_HTML5') ? ENT_HTML5 : ENT_COMPAT;
+$substituteFlag = defined('ENT_SUBSTITUTE') ? ENT_SUBSTITUTE : 0;
+
 $posts = [];
 $error = '';
+$hasCategoryColumn = false;
+$hasStatusColumn = false;
+
+function blogColumnExists(PDO $pdo, $column)
+{
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'blog_posts' AND COLUMN_NAME = :column"
+        );
+        $stmt->execute(['column' => $column]);
+        return (bool) $stmt->fetchColumn();
+    } catch (PDOException $e) {
+        try {
+            $check = $pdo->prepare("SHOW COLUMNS FROM blog_posts LIKE :column");
+            $check->execute(['column' => $column]);
+            return (bool) $check->fetch(PDO::FETCH_ASSOC);
+        } catch (PDOException $inner) {
+            return false;
+        }
+    }
+}
+
+function blogCategoryColumnExists(PDO $pdo)
+{
+    return blogColumnExists($pdo, 'category');
+}
+
+function ensureBlogCategoryColumn(PDO $pdo)
+{
+    if (blogCategoryColumnExists($pdo)) {
+        return true;
+    }
+
+    try {
+        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
+    } catch (PDOException $e) {
+        return false;
+    }
+
+    return blogCategoryColumnExists($pdo);
+}
+
+function buildBlogStatusClause($hasStatusColumn)
+{
+    if (!$hasStatusColumn) {
+        return '';
+    }
+
+    return " WHERE (status IS NULL OR status = '' OR LOWER(status) IN ('published','publish','active','approved','visible'))";
+}
+
+function buildBlogSelectQuery(array $columns, $hasStatusColumn)
+{
+    $columnSql = implode(', ', $columns);
+    $query = "SELECT $columnSql FROM blog_posts";
+    $query .= buildBlogStatusClause($hasStatusColumn);
+    $query .= ' ORDER BY created_at DESC';
+
+    return $query;
+}
+
+function deduplicateBlogPosts(array $items)
+{
+    $unique = [];
+    $seen = [];
+
+    foreach ($items as $item) {
+        $id = isset($item['id']) ? (string) $item['id'] : '';
+        $key = $id !== '' ? $id : sha1(json_encode($item));
+
+        if (isset($seen[$key])) {
+            continue;
+        }
+
+        $seen[$key] = true;
+        $unique[] = $item;
+    }
+
+    return array_values($unique);
+}
+
+function encodeBlogDataAttr($value)
+{
+    if ($value === null || $value === '') {
+        return '';
+    }
+
+    return base64_encode((string) $value);
+}
+
+function blogEscapeAttr($value)
+{
+    global $substituteFlag;
+    return htmlspecialchars((string) $value, ENT_QUOTES | $substituteFlag, 'UTF-8');
+}
 
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     ]);
-    $stmt = $pdo->query("SELECT id, title, author, summary, content, media_type, media_url, created_at, views, likes FROM blog_posts WHERE status = 'published' ORDER BY created_at DESC");
-    $posts = $stmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (PDOException $e) {
+    $hasCategoryColumn = ensureBlogCategoryColumn($pdo);
+    $hasStatusColumn = blogColumnExists($pdo, 'status');
+    $columns = ['id', 'title', 'author', 'summary', 'content', 'media_type', 'media_url', 'created_at', 'views', 'likes'];
+    if ($hasCategoryColumn) {
+        $columns[] = 'category';
+    }
+
+    $query = buildBlogSelectQuery($columns, $hasStatusColumn);
+
+    try {
+        $stmt = $pdo->query($query);
+    } catch (PDOException $queryException) {
+        if ($hasCategoryColumn && !blogCategoryColumnExists($pdo)) {
+            $hasCategoryColumn = false;
+        }
+        if ($hasStatusColumn && !blogColumnExists($pdo, 'status')) {
+            $hasStatusColumn = false;
+        }
+
+        if (!$hasCategoryColumn || !$hasStatusColumn) {
+            $columns = ['id', 'title', 'author', 'summary', 'content', 'media_type', 'media_url', 'created_at', 'views', 'likes'];
+            if ($hasCategoryColumn) {
+                $columns[] = 'category';
+            }
+            $query = buildBlogSelectQuery($columns, $hasStatusColumn);
+            $stmt = $pdo->query($query);
+        } else {
+            throw $queryException;
+        }
+    }
+    $posts = deduplicateBlogPosts($stmt->fetchAll(PDO::FETCH_ASSOC));
+} catch (Exception $e) {
+    error_log('[blogs.php] ' . $e->getMessage());
     $error = 'Unable to load blog posts right now.';
 }
 
-$featured = $posts ? array_shift($posts) : null;
+if (!$posts) {
+    $fallbackPath = __DIR__ . '/data/blogs.json';
+    if (is_readable($fallbackPath)) {
+        $fallbackData = json_decode(file_get_contents($fallbackPath), true);
+        if (is_array($fallbackData)) {
+            $posts = array_values(array_filter($fallbackData, function ($item) {
+                return is_array($item) && isset($item['title'], $item['summary'], $item['media_url']);
+            }));
+            $posts = deduplicateBlogPosts($posts);
+            usort($posts, function ($a, $b) {
+                return strcmp($b['created_at'] ?? '', $a['created_at'] ?? '');
+            });
+            if ($posts) {
+                $error = '';
+            }
+        }
+    }
+}
+
+function formatBlogDate($value)
+{
+    if (empty($value)) {
+        return '—';
+    }
+
+    try {
+        $date = new DateTime($value);
+        return $date->format('M j, Y');
+    } catch (Exception $e) {
+        return '—';
+    }
+}
+
+function decodeBlogPlain($value)
+{
+    global $html5Flag;
+    if ($value === null || $value === '') {
+        return '';
+    }
+
+    return trim(html_entity_decode(strip_tags((string) $value), ENT_QUOTES | $html5Flag, 'UTF-8'));
+}
+
+function buildBlogShareUrl($postId)
+{
+    $postId = (int) $postId;
+    if ($postId <= 0) {
+        return '';
+    }
+
+    $host = $_SERVER['HTTP_HOST'] ?? 'levelminds.in';
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+
+    return sprintf('%s://%s/blogs.php?post=%d', $scheme, $host, $postId);
+}
+
+$featured = $posts[0] ?? null;
+
+$audienceLabels = [
+    'teachers' => 'For Teachers',
+    'schools'  => 'For Schools',
+    'general'  => 'General Insights'
+];
+
+$groupedPosts = [];
+foreach ($posts as $post) {
+    $category = $hasCategoryColumn ? ($post['category'] ?? 'general') : 'general';
+    if (!isset($groupedPosts[$category])) {
+        $groupedPosts[$category] = [];
+    }
+    $groupedPosts[$category][] = $post;
+}
+
+if ($featured) {
+    $featuredId = (int)($featured['id'] ?? 0);
+    $featuredCategory = $hasCategoryColumn ? ($featured['category'] ?? 'general') : 'general';
+    if ($featuredId && isset($groupedPosts[$featuredCategory])) {
+        $groupedPosts[$featuredCategory] = array_values(array_filter(
+            $groupedPosts[$featuredCategory],
+            function ($item) use ($featuredId) {
+                return (int)($item['id'] ?? 0) !== $featuredId;
+            }
+        ));
+        if (!$groupedPosts[$featuredCategory]) {
+            unset($groupedPosts[$featuredCategory]);
+        }
+    }
+}
+
+$preferredOrder = ['teachers', 'schools', 'general'];
+$availableCategories = array_keys($groupedPosts);
+$orderedCategories = array_values(array_intersect($preferredOrder, $availableCategories));
+foreach ($availableCategories as $category) {
+    if (!in_array($category, $orderedCategories, true)) {
+        $orderedCategories[] = $category;
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -50,16 +274,77 @@ $featured = $posts ? array_shift($posts) : null;
   <link href="assets/vendors/bootstrap/bootstrap.min.css" rel="stylesheet">
   <link href="assets/vendors/bootstrap-icons/font/bootstrap-icons.min.css" rel="stylesheet">
   <link href="assets/css/style.css" rel="stylesheet">
-  \1
-  <link href="assets/css/overrides.css" rel="stylesheet"><style>
+  <link href="assets/css/overrides.css" rel="stylesheet">
+  <style>
     body { font-family: 'Public Sans', sans-serif; background-color: #F5FAFF; color: #1B2A4B; }
     .fbs__net-navbar { position: fixed; width: 100%; top: 0; left: 0; z-index: 1030; background-color: #FFFFFF !important; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); }
     .fbs__net-navbar .nav-link { color: #1B2A4B !important; }
     .fbs__net-navbar .nav-link:hover,
     .fbs__net-navbar .nav-link.active { color: #3C8DFF !important; }
-    .blog-card { transition: transform 0.3s ease, box-shadow 0.3s ease; }
-    .blog-card:hover { transform: translateY(-8px); box-shadow: 0 18px 45px rgba(32,139,255,0.15) !important; }
-    .featured-card { border-radius: 24px; overflow: hidden; box-shadow: 0 24px 65px rgba(32,139,255,0.18); background: #ffffff; }
+
+    .blog-hero { padding: 140px 0 80px; background: radial-gradient(circle at top right, rgba(60, 141, 255, 0.12), transparent 55%), linear-gradient(180deg, rgba(245, 250, 255, 0.35), rgba(245, 250, 255, 0)); }
+    .blog-hero h1 { font-size: 3.4rem; font-weight: 800; color: #0F1D3B; }
+    .blog-hero p.lead { color: rgba(15, 29, 59, 0.72); max-width: 620px; }
+    .hero-highlight { display: flex; flex-direction: column; gap: 1.5rem; }
+    .hero-feature { border-radius: 28px; overflow: hidden; background: #ffffff; box-shadow: 0 28px 80px rgba(32, 139, 255, 0.18); display: flex; flex-direction: column; height: 100%; }
+    .hero-feature-media { position: relative; min-height: 260px; background: #0F1D3B; }
+    .hero-feature-media img,
+    .hero-feature-media video,
+    .hero-feature-media iframe { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .hero-feature-body { padding: 2.25rem; display: flex; flex-direction: column; gap: 1rem; }
+    .hero-feature-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; color: #51617A; font-size: 0.95rem; }
+    .hero-feature-meta span { display: inline-flex; align-items: center; gap: 0.35rem; }
+    .hero-empty { border-radius: 24px; background: rgba(255,255,255,0.9); padding: 3rem; text-align: center; box-shadow: 0 16px 40px rgba(15,29,59,0.12); color: #51617A; }
+
+    .blog-section-heading { font-weight: 700; color: #0F1D3B; }
+    .blog-filter { gap: 0.75rem; overflow-x: auto; padding-bottom: 0.5rem; }
+    .blog-filter .btn { border-radius: 999px; padding: 0.5rem 1.5rem; font-weight: 600; color: #1B2A4B; border: 1px solid transparent; background: #fff; box-shadow: 0 10px 25px rgba(15,29,59,0.08); }
+    .blog-filter .btn.active, .blog-filter .btn:hover { background: #3C8DFF; color: #fff; }
+
+    .blog-card { border-radius: 22px; overflow: hidden; border: none; background: #ffffff; box-shadow: 0 22px 60px rgba(15,29,59,0.10); height: 100%; transition: transform 0.3s ease, box-shadow 0.3s ease; }
+    .blog-card:hover { transform: translateY(-8px); box-shadow: 0 26px 70px rgba(32,139,255,0.20); }
+    .blog-card__media { position: relative; overflow: hidden; }
+    .blog-card__media img, .blog-card__media video, .blog-card__media iframe { width: 100%; height: 220px; object-fit: cover; }
+    .blog-card__body { padding: 1.8rem; display: flex; flex-direction: column; gap: 1rem; }
+    .blog-card__category { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: #3C8DFF; font-weight: 700; }
+    .blog-card__title { font-size: 1.25rem; font-weight: 700; color: #0F1D3B; }
+    .blog-card__summary { color: #51617A; font-size: 0.98rem; }
+    .blog-card__footer { padding: 0 1.8rem 1.8rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: #51617A; font-size: 0.9rem; }
+    .btn-like { background: transparent; border: none; color: #51617A; display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600; cursor: pointer; transition: color 0.2s ease; }
+    .btn-like .bi { font-size: 1.1rem; }
+    .btn-like:hover, .btn-like.liked { color: #e6397f; }
+
+    .btn-share { background: #ffffff; border: 1px solid rgba(60, 141, 255, 0.35); border-radius: 999px; color: #3C8DFF; font-weight: 600; padding: 0.45rem 1.1rem; display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer; transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease; }
+    .btn-share:hover { background: #3C8DFF; color: #ffffff; box-shadow: 0 8px 22px rgba(60, 141, 255, 0.25); }
+    .btn-share--icon { padding: 0.4rem; width: 38px; height: 38px; border-radius: 50%; justify-content: center; }
+    .btn-share--icon i { margin: 0; }
+    .hero-feature-meta .btn-share { margin-left: auto; }
+
+    .lm-share-menu { background: #ffffff; border-radius: 14px; padding: 0.5rem; min-width: 210px; box-shadow: 0 20px 45px rgba(15,29,59,0.18); z-index: 1080; }
+    .lm-share-menu__item { border: none; background: transparent; width: 100%; text-align: left; padding: 0.45rem 0.75rem; border-radius: 10px; font-weight: 600; color: #1B2A4B; display: flex; align-items: center; gap: 0.5rem; transition: background 0.2s ease, color 0.2s ease; }
+    .lm-share-menu__item:hover { background: rgba(60, 141, 255, 0.12); color: #0F1D3B; }
+
+    .blog-empty { padding: 6rem 0; text-align: center; color: #51617A; }
+
+    .blog-modal .modal-content { border-radius: 24px; border: none; box-shadow: 0 30px 80px rgba(15,29,59,0.25); }
+    .blog-modal .modal-header { border-bottom: none; padding: 1.5rem 1.8rem 0; }
+    .blog-modal .modal-body { padding: 0 1.8rem 1.8rem; }
+    .blog-modal-media img, .blog-modal-media video, .blog-modal-media iframe { width: 100%; border-radius: 18px; }
+    .blog-modal-meta { display: flex; flex-wrap: wrap; gap: 1rem; color: #51617A; font-size: 0.95rem; margin-bottom: 1.5rem; }
+
+    @media (max-width: 991.98px) {
+      .blog-hero { padding: 120px 0 60px; }
+      .blog-hero h1 { font-size: 2.8rem; }
+      .hero-feature-body { padding: 1.75rem; }
+      .blog-card__body { padding: 1.5rem; }
+      .blog-card__footer { padding: 0 1.5rem 1.5rem; }
+    }
+
+    @media (max-width: 575.98px) {
+      .blog-hero h1 { font-size: 2.2rem; }
+      .hero-feature-media { min-height: 220px; }
+      .blog-card__media img, .blog-card__media video, .blog-card__media iframe { height: 180px; }
+    }
   </style>
 </head>
 
@@ -111,287 +396,407 @@ $featured = $posts ? array_shift($posts) : null;
     </header>
 
   <main style="padding-top: 110px;">
-    <section class="hero__v6 section" style="padding: 140px 0 80px;">
-      <div class="container">
-        <div class="row align-items-center g-5">
-          <div class="col-lg-8 mx-auto text-center" data-aos="fade-up">
-            <h1 class="hero-title mb-4" style="color: #0F1D3B; font-size: 3.5rem; font-weight: 800;">LevelMinds Blog</h1>
-            <p class="lead mb-4" style="color: rgba(15,29,59,0.72);">Insights, playbooks, and stories to help schools hire the right educatorsand help teachers grow careers they love.</p>
-            <div class="d-flex flex-column flex-md-row gap-3 justify-content-center">
-              <a href="#latest" class="btn btn-primary btn-lg px-4">Browse Posts</a>
+  <section class="blog-hero">
+    <div class="container">
+      <div class="row align-items-center g-5">
+        <div class="col-lg-5">
+          <div class="hero-highlight">
+            <span class="badge bg-primary-subtle text-primary fw-semibold px-3 py-2">LevelMinds Blog</span>
+            <h1 class="mb-0">Stories &amp; strategies for modern learning teams</h1>
+            <p class="lead mb-0">Insights, playbooks, and stories crafted for school leaders and teachers building the future of learning.</p>
+            <div class="d-flex flex-column flex-sm-row gap-3">
+              <a href="#blog-categories" class="btn btn-primary btn-lg px-4">Discover Stories</a>
               <a href="#newsletter" class="btn btn-outline-primary btn-lg px-4">Subscribe</a>
             </div>
           </div>
         </div>
-      </div>
-    </section>
-
-    <section class="section" id="latest" style="padding: 80px 0;">
-      <div class="container">
-        <?php if ($error): ?>
-          <div class="alert alert-danger text-center"><?php echo htmlspecialchars($error); ?></div>
-        <?php elseif (!$featured): ?>
-          <div class="text-center text-muted py-5">
-            <i class="bi bi-journal-text display-5 d-block mb-3"></i>
-            <p class="lead">No blog posts yet. Check back soon.</p>
-          </div>
-        <?php else: ?>
-          <div class="row g-4 mb-5">
-            <div class="col-12">
-              <div class="featured-card">
-                <div class="row g-0">
-                  <div class="col-lg-6">
-                    <?php if ($featured['media_type'] === 'video'): ?>
-                      <?php $isFeaturedExternal = preg_match('/^https?:\/\//i', $featured['media_url']); ?>
-                      <?php if ($isFeaturedExternal): ?>
-                      <div class="ratio ratio-16x9">
-                        <iframe src="<?php echo htmlspecialchars($featured['media_url']); ?>" title="<?php echo htmlspecialchars($featured['title']); ?>" allowfullscreen></iframe>
-                      </div>
-                      <?php else: ?>
-                      <div class="ratio ratio-16x9">
-                        <video controls class="w-100 h-100" style="object-fit: cover;">
-                          <source src="<?php echo htmlspecialchars($featured['media_url']); ?>">
-                          Your browser does not support the video tag.
-                        </video>
-                      </div>
-                      <?php endif; ?>
-                    <?php else: ?>
-                      <img src="<?php echo htmlspecialchars($featured['media_url']); ?>" class="img-fluid h-100" alt="<?php echo htmlspecialchars($featured['title']); ?>" style="object-fit: cover;">
-                    <?php endif; ?>
-                  </div>
-                  <div class="col-lg-6 d-flex align-items-center">
-                    <div class="p-4 p-lg-5">
-                      <span class="badge bg-primary-subtle text-primary mb-3">Featured</span>
-                      <h2 style="font-weight: 700; color: #0F1D3B;"><?php echo htmlspecialchars($featured['title']); ?></h2>
-                      <p class="mt-3" style="color: #51617A;"><?php echo nl2br(htmlspecialchars($featured['summary'])); ?></p>
-                      <?php if (!empty($featured['content'])): ?>
-                      <div class="mt-3" style="color: #51617A;"><?php echo nl2br(htmlspecialchars($featured['content'])); ?></div>
-                      <?php endif; ?>
-                      <div class="mt-4">
-                        <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#postModal"
-                          data-title="<?php echo htmlspecialchars($featured['title']); ?>"
-                          data-summary="<?php echo htmlspecialchars($featured['summary'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                          data-content="<?php echo htmlspecialchars($featured['content'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                          data-media-type="<?php echo htmlspecialchars($featured['media_type']); ?>"
-                          data-media-url="<?php echo htmlspecialchars($featured['media_url'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE); ?>"
-                          data-author="<?php echo htmlspecialchars($featured['author']); ?>"
-                          data-date="<?php echo date('M j, Y', strtotime($featured['created_at'])); ?>"
-                          data-views="<?php echo (int)$featured['views']; ?>"
-                          data-likes="<?php echo isset($featured['likes']) ? (int)$featured['likes'] : 0; ?>">
-                          View full post
-                        </button>
-                      </div>
-                      <div class="d-flex align-items-center gap-3 mt-4">
-                        <div>
-                          <div style="color: #1B2A4B; font-weight: 600;"><?php echo htmlspecialchars($featured['author']); ?><button class="btn-like" type="button" data-like-btn data-post-id="<?php echo (int)$featured['id']; ?>">
-  <i class="bi bi-heart"></i> <span data-like-count><?php echo isset($featured['likes']) ? (int)$featured['likes'] : 0; ?></span>
-</button></div>
-                          <small style="color: #51617A;"><?php echo date('M j, Y', strtotime($featured['created_at'])); ?> &bull; <?php echo (int)$featured['views']; ?> views</small>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+        <div class="col-lg-7">
+          <?php if ($error): ?>
+            <div class="hero-empty">
+              <i class="bi bi-exclamation-triangle display-5 d-block mb-3"></i>
+              <p class="lead mb-0"><?php echo htmlspecialchars($error); ?></p>
             </div>
-          </div>
-
-          <?php if ($posts): ?>
-          <div class="row g-4">
-            <?php foreach ($posts as $post): ?>
-            <div class="col-lg-4 col-md-6">
-              <div class="card blog-card border-0 shadow-sm h-100">
-                <?php if ($post['media_type'] === 'video'): ?>
-                  <?php $isExternalVideo = preg_match('/^https?:\/\//i', $post['media_url']); ?>
-                  <?php if ($isExternalVideo): ?>
-                  <div class="ratio ratio-16x9">
-                    <iframe src="<?php echo htmlspecialchars($post['media_url']); ?>" title="<?php echo htmlspecialchars($post['title']); ?>" allowfullscreen></iframe>
-                  </div>
+          <?php elseif (!$featured): ?>
+            <div class="hero-empty">
+              <i class="bi bi-journal-text display-5 d-block mb-3"></i>
+              <p class="lead mb-0">No blog posts yet. Check back soon.</p>
+            </div>
+          <?php else: ?>
+            <?php
+              $featuredId = (int) ($featured['id'] ?? 0);
+              $featuredCategory = $hasCategoryColumn ? ($featured['category'] ?? 'general') : 'general';
+              $featuredLabel = $audienceLabels[$featuredCategory] ?? ucfirst($featuredCategory);
+              $featuredViews = (int)($featured['views'] ?? 0);
+              $featuredLikes = (int)($featured['likes'] ?? 0);
+              $featuredDate = formatBlogDate($featured['created_at'] ?? null);
+              $featuredSummaryRaw = (string) ($featured['summary'] ?? '');
+              $featuredContentRaw = (string) ($featured['content'] ?? '');
+              $featuredSummaryPlain = decodeBlogPlain($featuredSummaryRaw);
+              $featuredShareUrl = buildBlogShareUrl($featuredId);
+              $featuredShareSummary = $featuredSummaryPlain !== '' ? $featuredSummaryPlain : decodeBlogPlain($featuredContentRaw);
+              $featuredSummaryEncoded = encodeBlogDataAttr($featuredSummaryRaw);
+              $featuredContentEncoded = encodeBlogDataAttr($featuredContentRaw);
+              $featuredShareSummaryEncoded = encodeBlogDataAttr($featuredShareSummary);
+              $isFeaturedExternal = $featured['media_type'] === 'video' ? preg_match('/^https?:\/\//i', $featured['media_url']) : false;
+            ?>
+            <article class="hero-feature">
+              <div class="hero-feature-media">
+                <?php if ($featured['media_type'] === 'video'): ?>
+                  <?php if ($isFeaturedExternal && !preg_match('/\.(mp4|mov|m4v|webm|ogv|ogg)(\?|$)/i', $featured['media_url'])): ?>
+                    <iframe src="<?php echo blogEscapeAttr($featured['media_url']); ?>" title="<?php echo htmlspecialchars($featured['title']); ?>" allowfullscreen></iframe>
                   <?php else: ?>
-                  <video controls class="card-img-top" style="height: 220px; object-fit: cover;">
-                    <source src="<?php echo htmlspecialchars($post['media_url']); ?>">
-                    Your browser does not support the video tag.
-                  </video>
+                    <video class="w-100 h-100" controls>
+                      <source src="<?php echo blogEscapeAttr($featured['media_url']); ?>">
+                      Your browser does not support the video tag.
+                    </video>
                   <?php endif; ?>
                 <?php else: ?>
-                  <img src="<?php echo htmlspecialchars($post['media_url']); ?>" class="card-img-top" alt="<?php echo htmlspecialchars($post['title']); ?>" style="height: 220px; object-fit: cover;">
+                  <img src="<?php echo blogEscapeAttr($featured['media_url']); ?>" alt="<?php echo htmlspecialchars($featured['title']); ?>">
                 <?php endif; ?>
-                <div class="card-body p-4">
-                  <?php $badgeClass = $post['media_type'] === 'video' ? 'bg-info text-white' : 'bg-primary-subtle text-primary'; ?>
-                  <span class="badge <?php echo $badgeClass; ?> mb-2"><?php echo ucfirst($post['media_type']); ?></span>
-                  <p class="card-text" style="color: #51617A;">
-                    <?php echo nl2br(htmlspecialchars($post['summary'])); ?>
-                  </p>
-                  <div class="mt-3">
-                    <button type="button"
-                        class="btn btn-primary"
-                        data-bs-toggle="modal"
-                        data-bs-target="#postModal"
-                        data-id="<?php echo (int)$post['id']; ?>"
-                        data-title="<?php echo htmlspecialchars($post['title']); ?>"
-                        data-author="<?php echo htmlspecialchars($post['author']); ?>"
-                        data-date="<?php echo date('M j, Y', strtotime($post['created_at'])); ?>"
-                        data-views="<?php echo (int)$post['views']; ?>"
-                        data-likes="<?php echo (int)$post['likes']; ?>"
-                        data-summary="<?php echo htmlspecialchars($post['summary']); ?>"
-                        data-content="<?php echo htmlspecialchars($post['content']); ?>"
-                        data-media-type="<?php echo htmlspecialchars($post['media_type']); ?>"
-                        data-media-url="<?php echo htmlspecialchars($post['media_url']); ?>">
-                  View details
-                </button>
+              </div>
+              <div class="hero-feature-body">
+                <div>
+                  <span class="badge bg-primary-subtle text-primary text-uppercase fw-semibold px-3 py-2"><?php echo htmlspecialchars($featuredLabel); ?></span>
+                </div>
+                <h2 class="mb-0"><?php echo htmlspecialchars($featured['title']); ?></h2>
+                <p class="lead text-muted mb-0"><?php echo htmlspecialchars($featuredSummaryPlain); ?></p>
+                <div class="hero-feature-meta">
+                  <span><i class="bi bi-person-circle"></i> <?php echo htmlspecialchars($featured['author']); ?></span>
+                  <span><i class="bi bi-calendar-event"></i> <?php echo $featuredDate; ?></span>
+                  <span><i class="bi bi-eye"></i> <span data-views-for="<?php echo $featuredId; ?>"><?php echo number_format($featuredViews); ?></span> views</span>
+                  <button class="btn-share" type="button"
+                    data-share-btn
+                    data-post-id="<?php echo $featuredId; ?>"
+                    data-share-url="<?php echo blogEscapeAttr($featuredShareUrl); ?>"
+                    data-share-title="<?php echo blogEscapeAttr($featured['title']); ?>"
+                    data-share-summary="<?php echo blogEscapeAttr($featuredShareSummary); ?>"
+                    data-share-summary-b64="<?php echo blogEscapeAttr($featuredShareSummaryEncoded); ?>">
+                    <i class="bi bi-share"></i> Share
+                  </button>
+                </div>
+                <div class="d-flex flex-wrap align-items-center gap-3">
+                  <button type="button" class="btn btn-primary px-4" data-bs-toggle="modal" data-bs-target="#blogModal"
+                    data-id="<?php echo $featuredId; ?>"
+                    data-title="<?php echo blogEscapeAttr($featured['title']); ?>"
+                    data-author="<?php echo blogEscapeAttr($featured['author']); ?>"
+                    data-date="<?php echo $featuredDate; ?>"
+                    data-category="<?php echo blogEscapeAttr($featuredCategory); ?>"
+                    data-category-label="<?php echo blogEscapeAttr($featuredLabel); ?>"
+                    data-views="<?php echo $featuredViews; ?>"
+                    data-likes="<?php echo $featuredLikes; ?>"
+                    data-summary="<?php echo blogEscapeAttr($featuredSummaryRaw); ?>"
+                    data-summary-b64="<?php echo blogEscapeAttr($featuredSummaryEncoded); ?>"
+                    data-content="<?php echo blogEscapeAttr($featuredContentRaw); ?>"
+                    data-content-b64="<?php echo blogEscapeAttr($featuredContentEncoded); ?>"
+                    data-media-type="<?php echo blogEscapeAttr($featured['media_type']); ?>"
+                    data-media-url="<?php echo blogEscapeAttr($featured['media_url'] ?? ''); ?>"
+                    data-share-url="<?php echo blogEscapeAttr($featuredShareUrl); ?>"
+                    data-share-title="<?php echo blogEscapeAttr($featured['title']); ?>"
+                    data-share-summary="<?php echo blogEscapeAttr($featuredShareSummary); ?>"
+                    data-share-summary-b64="<?php echo blogEscapeAttr($featuredShareSummaryEncoded); ?>">
+                    Read full story
+                  </button>
+                  <button class="btn-like" type="button" data-like-btn data-post-id="<?php echo $featuredId; ?>">
+                    <i class="bi bi-heart"></i>
+                    <span data-like-count><?php echo number_format($featuredLikes); ?></span>
+                  </button>
+                </div>
+              </div>
+            </article>
+          <?php endif; ?>
+        </div>
+      </div>
+    </div>
+  </section>
 
+  <?php if ($featured && !empty($groupedPosts)): ?>
+  <section class="py-5" id="blog-categories">
+    <div class="container">
+      <div class="row align-items-center mb-4">
+        <div class="col-lg-8">
+          <h2 class="blog-section-heading mb-2">Discover blogs by categories</h2>
+          <p class="text-muted mb-0">Switch between content designed for teachers and school leaders.</p>
+        </div>
+      </div>
+      <div class="d-flex blog-filter" role="tablist">
+        <button type="button" class="btn active" data-filter="all">Latest articles</button>
+        <?php foreach ($orderedCategories as $categoryKey): ?>
+          <?php if (empty($groupedPosts[$categoryKey])) { continue; }
+          $label = $audienceLabels[$categoryKey] ?? ucfirst($categoryKey); ?>
+          <button type="button" class="btn" data-filter="<?php echo blogEscapeAttr($categoryKey); ?>"><?php echo htmlspecialchars($label); ?></button>
+        <?php endforeach; ?>
+      </div>
+      <?php $renderedPostIds = []; ?>
+      <div class="row g-4 mt-2" id="blogCards">
+        <?php foreach ($orderedCategories as $categoryKey): ?>
+          <?php if (empty($groupedPosts[$categoryKey])) { continue; }
+          $label = $audienceLabels[$categoryKey] ?? ucfirst($categoryKey); ?>
+          <?php foreach ($groupedPosts[$categoryKey] as $post): ?>
+            <?php
+              $postId = (int)$post['id'];
+              if ($postId > 0 && isset($renderedPostIds[$postId])) {
+                  continue;
+              }
+              if ($postId > 0) {
+                  $renderedPostIds[$postId] = true;
+              }
+              $postViews = (int)($post['views'] ?? 0);
+              $postLikes = (int)($post['likes'] ?? 0);
+              $postDate = formatBlogDate($post['created_at'] ?? null);
+              $postSummary = (string) ($post['summary'] ?? '');
+              $postContentRaw = (string) ($post['content'] ?? '');
+              $postSummaryPlain = decodeBlogPlain($postSummary);
+              $postShareUrl = buildBlogShareUrl($postId);
+              $postShareSummary = $postSummaryPlain !== '' ? $postSummaryPlain : decodeBlogPlain($postContentRaw);
+              $postSummaryEncoded = encodeBlogDataAttr($postSummary);
+              $postContentEncoded = encodeBlogDataAttr($postContentRaw);
+              $postShareSummaryEncoded = encodeBlogDataAttr($postShareSummary);
+            ?>
+            <div class="col-xl-4 col-md-6" data-blog-card data-category="<?php echo blogEscapeAttr($categoryKey); ?>">
+              <article class="blog-card h-100 d-flex flex-column">
+                <div class="blog-card__media">
+                  <?php if ($post['media_type'] === 'video'): ?>
+                    <?php $isExternalVideo = preg_match('/^https?:\/\//i', $post['media_url']); ?>
+                    <?php if ($isExternalVideo && !preg_match('/\.(mp4|mov|m4v|webm|ogv|ogg)(\?|$)/i', $post['media_url'])): ?>
+                      <div class="ratio ratio-16x9">
+                        <iframe src="<?php echo blogEscapeAttr($post['media_url']); ?>" title="<?php echo htmlspecialchars($post['title']); ?>" allowfullscreen></iframe>
+                      </div>
+                    <?php else: ?>
+                      <video class="w-100" controls style="object-fit: cover; height: 220px;">
+                        <source src="<?php echo blogEscapeAttr($post['media_url']); ?>">
+                        Your browser does not support the video tag.
+                      </video>
+                    <?php endif; ?>
+                  <?php else: ?>
+                    <img src="<?php echo blogEscapeAttr($post['media_url']); ?>" alt="<?php echo htmlspecialchars($post['title']); ?>" style="width: 100%; height: 220px; object-fit: cover;">
+                  <?php endif; ?>
+                </div>
+                <div class="blog-card__body">
+                  <span class="blog-card__category"><?php echo htmlspecialchars($label); ?></span>
+                  <h3 class="blog-card__title"><?php echo htmlspecialchars($post['title']); ?></h3>
+                  <p class="blog-card__summary mb-0"><?php echo htmlspecialchars($postSummaryPlain); ?></p>
+                  <div class="d-flex flex-wrap gap-3 text-muted small">
+                    <span class="d-inline-flex align-items-center gap-1"><i class="bi bi-person"></i> <?php echo htmlspecialchars($post['author']); ?></span>
+                    <span class="d-inline-flex align-items-center gap-1"><i class="bi bi-calendar-event"></i> <?php echo $postDate; ?></span>
+                  </div>
+                  <div>
+                    <button type="button" class="btn btn-outline-primary px-3" data-bs-toggle="modal" data-bs-target="#blogModal"
+                      data-id="<?php echo $postId; ?>"
+                      data-title="<?php echo blogEscapeAttr($post['title']); ?>"
+                      data-author="<?php echo blogEscapeAttr($post['author']); ?>"
+                      data-date="<?php echo $postDate; ?>"
+                      data-category="<?php echo blogEscapeAttr($categoryKey); ?>"
+                      data-category-label="<?php echo blogEscapeAttr($label); ?>"
+                      data-views="<?php echo $postViews; ?>"
+                      data-likes="<?php echo $postLikes; ?>"
+                      data-summary="<?php echo blogEscapeAttr($postSummary); ?>"
+                      data-summary-b64="<?php echo blogEscapeAttr($postSummaryEncoded); ?>"
+                      data-content="<?php echo blogEscapeAttr($postContentRaw); ?>"
+                      data-content-b64="<?php echo blogEscapeAttr($postContentEncoded); ?>"
+                      data-media-type="<?php echo blogEscapeAttr($post['media_type']); ?>"
+                      data-media-url="<?php echo blogEscapeAttr($post['media_url'] ?? ''); ?>"
+                      data-share-url="<?php echo blogEscapeAttr($postShareUrl); ?>"
+                      data-share-title="<?php echo blogEscapeAttr($post['title']); ?>"
+                      data-share-summary="<?php echo blogEscapeAttr($postShareSummary); ?>"
+                      data-share-summary-b64="<?php echo blogEscapeAttr($postShareSummaryEncoded); ?>">
+                      Read article
+                    </button>
                   </div>
                 </div>
-                <div class="card-footer bg-white border-0 p-4 pt-0 d-flex justify-content-between align-items-center">
-  <small class="text-muted"><?php echo date('M j, Y', strtotime($post['created_at'])); ?></small>
-
-  <button class="btn-like" type="button"
-          data-like-btn
-          data-post-id="<?php echo (int)$post['id']; ?>">
-    <i class="bi bi-heart"></i>
-    <span data-like-count><?php echo (int)$post['likes']; ?></span>
-  </button>
-</div>
-
-              </div>
+                <div class="blog-card__footer">
+                  <span class="d-inline-flex align-items-center gap-1 text-muted"><i class="bi bi-eye"></i> <span data-views-for="<?php echo $postId; ?>"><?php echo number_format($postViews); ?></span></span>
+                  <div class="d-flex align-items-center gap-2">
+                    <button class="btn-share btn-share--icon" type="button"
+                      data-share-btn
+                      data-post-id="<?php echo $postId; ?>"
+                      data-share-url="<?php echo blogEscapeAttr($postShareUrl); ?>"
+                      data-share-title="<?php echo blogEscapeAttr($post['title']); ?>"
+                      data-share-summary="<?php echo blogEscapeAttr($postShareSummary); ?>"
+                      data-share-summary-b64="<?php echo blogEscapeAttr($postShareSummaryEncoded); ?>">
+                      <i class="bi bi-share"></i>
+                    </button>
+                    <button class="btn-like" type="button" data-like-btn data-post-id="<?php echo $postId; ?>">
+                      <i class="bi bi-heart"></i>
+                      <span data-like-count><?php echo number_format($postLikes); ?></span>
+                    </button>
+                  </div>
+                </div>
+              </article>
             </div>
-            <?php endforeach; ?>
-          </div>
-          <?php endif; ?>
-        <?php endif; ?>
+          <?php endforeach; ?>
+        <?php endforeach; ?>
       </div>
-    </section>
-
-    <div class="modal fade" id="postModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" data-post-title>Post</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-
-      <div class="modal-body">
-        <!-- Media -->
-        <div class="mb-3" data-post-media></div>
-
-        <!-- Meta row -->
-        <div class="d-flex align-items-center gap-2 mb-3">
-          <span class="text-muted" data-post-author>LM</span>
-          <span class="mx-1">•</span>
-          <span class="text-muted" data-post-date></span>
-          <span class="mx-1">•</span>
-          <span class="text-muted"><span data-post-views>0</span> views</span>
-
-          <!-- Like in modal (floats right) -->
-          <button class="btn-like ms-auto" type="button"
-                  data-like-btn
-                  data-modal-like
-                  data-post-id="">
-            <i class="bi bi-heart"></i>
-            <span data-like-count>0</span>
-          </button>
+    </div>
+  </section>
+  <?php elseif ($featured): ?>
+  <section class="py-5" id="blog-categories">
+    <div class="container">
+      <div class="row justify-content-center text-center">
+        <div class="col-lg-7">
+          <h2 class="blog-section-heading mb-3">More stories coming soon</h2>
+          <p class="text-muted mb-0">We're crafting fresh insights for teachers and school leaders. Check back shortly for new additions.</p>
         </div>
+      </div>
+    </div>
+  </section>
+  <?php endif; ?>
 
-        <!-- Summary + Content -->
-        <p class="mb-3" data-post-summary></p>
-        <div data-post-content class=""></div>
+  <div class="modal fade blog-modal" id="blogModal" tabindex="-1" aria-labelledby="blogModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header align-items-start">
+          <div>
+            <span class="badge bg-primary-subtle text-primary" data-modal-category></span>
+            <h2 class="modal-title h3 mt-2 mb-0" id="blogModalLabel" data-post-title>Blog post</h2>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="blog-modal-media mb-4" data-post-media></div>
+          <div class="blog-modal-meta">
+            <span class="d-inline-flex align-items-center gap-2"><i class="bi bi-person-circle"></i> <span data-post-author></span></span>
+            <span class="d-inline-flex align-items-center gap-2"><i class="bi bi-calendar-event"></i> <span data-post-date></span></span>
+            <span class="d-inline-flex align-items-center gap-2"><i class="bi bi-eye"></i> <span data-post-views>0</span> views</span>
+            <div class="ms-auto d-flex align-items-center gap-2">
+              <button class="btn-share btn-share--icon" type="button"
+                data-share-btn
+                data-modal-share
+                data-share-url=""
+                data-share-title=""
+                data-share-summary="">
+                <i class="bi bi-share"></i>
+              </button>
+              <button class="btn-like" type="button" data-like-btn data-modal-like data-post-id="">
+                <i class="bi bi-heart"></i>
+                <span data-like-count>0</span>
+              </button>
+            </div>
+          </div>
+          <p class="lead text-muted" data-post-summary></p>
+          <div data-post-content class="mt-3"></div>
+        </div>
       </div>
     </div>
   </div>
-</div>
 
-      </div>
-    </div>
-
-    <section class="section" id="newsletter" style="padding: 80px 0;">
-      <div class="container">
-        <div class="row justify-content-center text-center">
-          <div class="col-lg-7">
-            <h2 style="font-size: 2.5rem; font-weight: 700; color: #1B2A4B;">Get hiring insights in your inbox</h2>
-            <p class="lead mb-4" style="color: #51617A;">Monthly stories on hiring best practices, educator success, and product releases.</p>
-            <form class="d-flex flex-column flex-md-row gap-3 justify-content-center" action="newsletter.php" method="post">
-              <input type="email" class="form-control form-control-lg" name="email" placeholder="Email address" required>
-              <button class="btn btn-primary btn-lg px-4" type="submit">Subscribe</button>
-            </form>
-          </div>
+  <section class="section" id="newsletter" style="padding: 80px 0;">
+    <div class="container">
+      <div class="row justify-content-center text-center">
+        <div class="col-lg-7">
+          <h2 style="font-size: 2.5rem; font-weight: 700; color: #1B2A4B;">Get hiring insights in your inbox</h2>
+          <p class="lead mb-4" style="color: #51617A;">Monthly stories on hiring best practices, educator success, and product releases.</p>
+          <form class="d-flex flex-column flex-md-row gap-3 justify-content-center" action="newsletter.php" method="post">
+            <input type="email" class="form-control form-control-lg" name="email" placeholder="Email address" required>
+            <button class="btn btn-primary btn-lg px-4" type="submit">Subscribe</button>
+          </form>
         </div>
       </div>
-    </section>
-  </main>
-
-  <div data-global-footer></div>
+    </div>
+  </section>
+</main>
+<div data-global-footer></div>
   <script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
   <script src="assets/js/footer.js"></script>
+  <script src="assets/js/custom.js?v=4"></script>
   <script>
-    (function () {
-      const modalEl = document.getElementById('postModal');
+    document.addEventListener('DOMContentLoaded', function () {
+      const filterButtons = document.querySelectorAll('[data-filter]');
+      const cards = document.querySelectorAll('[data-blog-card]');
+
+      filterButtons.forEach(function (button) {
+        button.addEventListener('click', function () {
+          filterButtons.forEach(btn => btn.classList.remove('active'));
+          button.classList.add('active');
+          const filter = button.getAttribute('data-filter');
+          cards.forEach(function (card) {
+            const category = card.getAttribute('data-category');
+            const matches = filter === 'all' || category === filter;
+            card.style.display = matches ? '' : 'none';
+          });
+        });
+      });
+
+      const formatNumber = (value) => {
+        const num = Number(value);
+        return Number.isFinite(num) ? num.toLocaleString() : String(value || '0');
+      };
+
+      const modalEl = document.getElementById('blogModal');
       if (!modalEl) {
         return;
       }
-      modalEl.addEventListener('show.bs.modal', function (event) {
-        const trigger = event.relatedTarget;
-        if (!trigger) {
-          return;
-        }
-        const titleEl = modalEl.querySelector('[data-post-title]');
-        const summaryEl = modalEl.querySelector('[data-post-summary]');
-        const contentEl = modalEl.querySelector('[data-post-content]');
-        const authorEl = modalEl.querySelector('[data-post-author]');
-        const dateEl = modalEl.querySelector('[data-post-date]');
-        const viewsEl = modalEl.querySelector('[data-post-views]');
-        const likesEl = modalEl.querySelector('[data-post-likes]');
-        const likesBullet = likesEl ? likesEl.previousElementSibling : null;
-        const mediaWrapper = modalEl.querySelector('[data-post-media]');
 
-        const title = trigger.getAttribute('data-title') || '';
-        const summary = trigger.getAttribute('data-summary') || '';
-        const content = trigger.getAttribute('data-content') || '';
-        const author = trigger.getAttribute('data-author') || '';
-        const created = trigger.getAttribute('data-date') || '';
-        const views = trigger.getAttribute('data-views') || '';
-        const likes = trigger.getAttribute('data-likes') || '';
-        const mediaType = (trigger.getAttribute('data-media-type') || '').toLowerCase();
-        const mediaUrl = trigger.getAttribute('data-media-url') || '';
-
-        titleEl.textContent = title;
-        summaryEl.innerHTML = formatText(summary);
-        if (content.trim()) {
-          contentEl.innerHTML = formatText(content);
-          contentEl.style.display = '';
-        } else {
-          contentEl.innerHTML = '';
-          contentEl.style.display = 'none';
+      const decodeHtml = (value) => {
+        if (value == null) {
+          return '';
         }
-        authorEl.textContent = author || 'LevelMinds';
-        dateEl.textContent = created;
-        if (viewsEl) {
-          if (views) {
-            viewsEl.textContent = views + ' views';
-            viewsEl.style.display = '';
-          } else {
-            viewsEl.textContent = '';
-            viewsEl.style.display = 'none';
+        const textarea = document.createElement('textarea');
+        textarea.innerHTML = String(value);
+        return textarea.value;
+      };
+
+      const decodeBase64 = (value) => {
+        if (!value) {
+          return '';
+        }
+        try {
+          const binary = atob(value);
+          if (window.TextDecoder) {
+            const decoder = new TextDecoder('utf-8', { fatal: false });
+            const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+            return decoder.decode(bytes);
+          }
+          return decodeURIComponent(Array.prototype.map.call(binary, function (char) {
+            return '%' + ('00' + char.charCodeAt(0).toString(16)).slice(-2);
+          }).join(''));
+        } catch (error) {
+          return '';
+        }
+      };
+
+      const encodeBase64 = (value) => {
+        if (!value) {
+          return '';
+        }
+        try {
+          if (window.TextEncoder) {
+            const encoder = new TextEncoder();
+            const bytes = encoder.encode(value);
+            let binary = '';
+            bytes.forEach((byte) => {
+              binary += String.fromCharCode(byte);
+            });
+            return btoa(binary);
+          }
+          return btoa(unescape(encodeURIComponent(value)));
+        } catch (error) {
+          return '';
+        }
+      };
+
+      const readDatasetContent = (dataset, base64Key, fallbackKey) => {
+        if (base64Key && dataset[base64Key]) {
+          const decoded = decodeBase64(dataset[base64Key]);
+          if (decoded !== '') {
+            return decoded;
           }
         }
-        if (likesEl) {
-          if (likes) {
-            likesEl.textContent = likes + ' likes';
-            likesEl.style.display = '';
-            if (likesBullet) likesBullet.style.display = '';
-          } else {
-            likesEl.textContent = '';
-            likesEl.style.display = 'none';
-            if (likesBullet) likesBullet.style.display = 'none';
-          }
+        if (fallbackKey && dataset[fallbackKey]) {
+          return decodeHtml(dataset[fallbackKey]);
         }
-        renderMedia(mediaWrapper, mediaType, mediaUrl, title);
-      });
+        return '';
+      };
 
-      function formatText(str) {
-        return (str || '').replace(/(?:\r\n|\r|\n)/g, '<br>');
-      }
+      const buildShareUrl = (id) => {
+        const postId = String(id || '').trim();
+        const origin = window.location.origin || (window.location.protocol + '//' + window.location.host);
+        if (!postId) {
+          return origin + window.location.pathname;
+        }
+        return origin.replace(/\/$/, '') + '/blogs.php?post=' + postId;
+      };
 
-      function renderMedia(container, type, url, title) {
+      const renderMedia = (container, type, url, title) => {
         if (!container) {
           return;
         }
@@ -406,9 +811,9 @@ $featured = $posts ? array_shift($posts) : null;
           if (isExternal && !url.match(/\.(mp4|mov|m4v|webm|ogv|ogg)(\?|$)/i)) {
             const iframe = document.createElement('iframe');
             iframe.src = url;
-            iframe.title = 'Video';
+            iframe.title = title || 'Video';
             iframe.allowFullscreen = true;
-            iframe.className = 'w-100';
+            iframe.className = 'w-100 rounded';
             iframe.style.minHeight = '360px';
             container.appendChild(iframe);
           } else {
@@ -427,373 +832,149 @@ $featured = $posts ? array_shift($posts) : null;
           img.className = 'img-fluid rounded';
           container.appendChild(img);
         }
+      };
+
+      modalEl.addEventListener('show.bs.modal', function (event) {
+        const trigger = event.relatedTarget;
+        if (!trigger) {
+          return;
+        }
+
+        const dataset = trigger.dataset;
+        const postId = dataset.id || '';
+        const title = dataset.title || '';
+        const author = dataset.author || '';
+        const date = dataset.date || '';
+        const categoryLabel = dataset.categoryLabel || '';
+        const summary = readDatasetContent(dataset, 'summaryB64', 'summary');
+        const content = readDatasetContent(dataset, 'contentB64', 'content');
+        const mediaType = (dataset.mediaType || '').toLowerCase();
+        const mediaUrl = dataset.mediaUrl || '';
+        const shareUrl = dataset.shareUrl || '';
+        let shareSummary = readDatasetContent(dataset, 'shareSummaryB64', 'shareSummary');
+        if (!shareSummary) {
+          shareSummary = summary;
+        }
+        const likes = parseInt(dataset.likes || '0', 10);
+        const views = parseInt(dataset.views || '0', 10);
+
+        modalEl.dataset.postId = postId;
+        modalEl.__relatedTrigger = trigger;
+
+        const titleEl = modalEl.querySelector('[data-post-title]');
+        const authorEl = modalEl.querySelector('[data-post-author]');
+        const dateEl = modalEl.querySelector('[data-post-date]');
+        const viewsEl = modalEl.querySelector('[data-post-views]');
+        const summaryEl = modalEl.querySelector('[data-post-summary]');
+        const contentEl = modalEl.querySelector('[data-post-content]');
+        const mediaEl = modalEl.querySelector('[data-post-media]');
+        const categoryEl = modalEl.querySelector('[data-modal-category]');
+        const likeBtn = modalEl.querySelector('[data-modal-like]');
+        const shareBtn = modalEl.querySelector('[data-modal-share]');
+
+        if (titleEl) titleEl.textContent = title;
+        if (authorEl) authorEl.textContent = author || 'LevelMinds Team';
+        if (dateEl) dateEl.textContent = date;
+        if (viewsEl) viewsEl.textContent = formatNumber(views);
+        if (summaryEl) summaryEl.textContent = summary;
+        if (contentEl) contentEl.innerHTML = content;
+        if (categoryEl) {
+          categoryEl.textContent = categoryLabel;
+          categoryEl.style.display = categoryLabel ? '' : 'none';
+        }
+
+        renderMedia(mediaEl, mediaType, mediaUrl, title);
+
+        if (likeBtn) {
+          likeBtn.setAttribute('data-post-id', postId);
+          const countEl = likeBtn.querySelector('[data-like-count]');
+          if (countEl) countEl.textContent = formatNumber(likes);
+          if (window.LM && typeof window.LM.hydrateLikes === 'function') {
+            window.LM.hydrateLikes();
+          }
+        }
+
+        if (shareBtn) {
+          shareBtn.setAttribute('data-post-id', postId);
+          const computedShareUrl = shareUrl || buildShareUrl(postId);
+          const computedShareSummary = shareSummary || summary;
+          shareBtn.setAttribute('data-share-url', computedShareUrl);
+          shareBtn.setAttribute('data-share-title', title);
+          shareBtn.setAttribute('data-share-summary', computedShareSummary);
+          const encoded = encodeBase64(computedShareSummary);
+          if (encoded) {
+            shareBtn.setAttribute('data-share-summary-b64', encoded);
+          } else {
+            shareBtn.removeAttribute('data-share-summary-b64');
+          }
+        }
+      });
+
+      modalEl.addEventListener('hidden.bs.modal', function () {
+        modalEl.__relatedTrigger = null;
+        if (window.history && typeof window.history.replaceState === 'function') {
+          const current = new URL(window.location.href);
+          if (current.searchParams.has('post')) {
+            current.searchParams.delete('post');
+            const nextSearch = current.searchParams.toString();
+            const nextUrl = nextSearch ? `${current.pathname}?${nextSearch}` : current.pathname;
+            window.history.replaceState({}, '', nextUrl);
+          }
+        }
+      });
+
+      modalEl.addEventListener('shown.bs.modal', function () {
+        const trigger = modalEl.__relatedTrigger;
+        const postId = modalEl.dataset.postId;
+        if (!postId || !window.LM || typeof window.LM.trackView !== 'function') {
+          return;
+        }
+        const initialViews = trigger ? parseInt(trigger.getAttribute('data-views') || '0', 10) : 0;
+        window.LM.trackView(postId, {
+          initialViews,
+          updateUI: function (latest) {
+            const viewsEl = modalEl.querySelector('[data-post-views]');
+            if (viewsEl) viewsEl.textContent = formatNumber(latest);
+            document.querySelectorAll('[data-views-for="' + postId + '"]').forEach(function (el) {
+              el.textContent = formatNumber(latest);
+            });
+            if (trigger) {
+              trigger.setAttribute('data-views', String(latest));
+            }
+          }
+        });
+      });
+
+      document.addEventListener('lm:likes-updated', function (event) {
+        const detail = event.detail || {};
+        const postId = detail.postId;
+        if (!postId) return;
+        const likes = typeof detail.likes === 'number' ? detail.likes : null;
+        document.querySelectorAll('[data-like-btn][data-post-id="' + postId + '"]').forEach(function (btn) {
+          const countEl = btn.querySelector('[data-like-count]');
+          if (countEl && likes !== null) {
+            countEl.textContent = formatNumber(likes);
+          }
+        });
+        document.querySelectorAll('[data-id="' + postId + '"]').forEach(function (trigger) {
+          if (likes !== null) {
+            trigger.setAttribute('data-likes', String(likes));
+          }
+        });
+      });
+
+      const params = new URLSearchParams(window.location.search);
+      const initialPost = params.get('post');
+      if (initialPost) {
+        const opener = document.querySelector('[data-bs-target="#blogModal"][data-id="' + initialPost + '"]');
+        if (opener) {
+          setTimeout(function () {
+            opener.click();
+          }, 350);
+        }
       }
-    })();
+    });
   </script>
-  <script>
-document.addEventListener('DOMContentLoaded', function() {
-  const modalEl = document.getElementById('postModal');
-  if (!modalEl) return;
-
-  modalEl.addEventListener('show.bs.modal', function (event) {
-    const trigger = event.relatedTarget;
-    if (!trigger) return;
-
-    // Pull id/likes from the trigger's data-* attributes
-    const id = trigger.getAttribute('data-id');
-    const likes = parseInt(trigger.getAttribute('data-likes') || '0', 10);
-
-    const likeBtn = modalEl.querySelector('[data-modal-like]');
-    if (!likeBtn) return;
-
-    likeBtn.setAttribute('data-post-id', id);
-    const countEl = likeBtn.querySelector('[data-like-count]');
-    if (countEl) countEl.textContent = String(likes);
-  });
-});
-</script>
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-  const modalEl = document.getElementById('postModal');
-  if (!modalEl) return;
-
-  function decodeHtmlEntities(str) {
-    const txt = document.createElement('textarea');
-    txt.innerHTML = str == null ? '' : String(str);
-    return txt.value;
-  }
-
-  modalEl.addEventListener('show.bs.modal', function (event) {
-    const trigger = event.relatedTarget;
-    if (!trigger) return;
-
-    // Read data-* from the button
-    const id        = trigger.getAttribute('data-id');
-    const title     = trigger.getAttribute('data-title') || '';
-    const author    = trigger.getAttribute('data-author') || 'LM';
-    const date      = trigger.getAttribute('data-date') || '';
-    const views     = trigger.getAttribute('data-views') || '0';
-    const likes     = trigger.getAttribute('data-likes') || '0';
-    const summary   = trigger.getAttribute('data-summary') || '';
-    const content   = trigger.getAttribute('data-content') || '';
-    const mediaType = (trigger.getAttribute('data-media-type') || '').toLowerCase();
-    const mediaUrl  = trigger.getAttribute('data-media-url') || '';
-
-    // Fill basic fields
-    const titleEl   = modalEl.querySelector('[data-post-title]');
-    const authorEl  = modalEl.querySelector('[data-post-author]');
-    const dateEl    = modalEl.querySelector('[data-post-date]');
-    const viewsEl   = modalEl.querySelector('[data-post-views]');
-    const sumEl     = modalEl.querySelector('[data-post-summary]');
-    const contentEl = modalEl.querySelector('[data-post-content]');
-    const mediaEl   = modalEl.querySelector('[data-post-media]');
-    const likeBtn   = modalEl.querySelector('[data-modal-like]');
-
-    if (titleEl)  titleEl.textContent = title;
-    if (authorEl) authorEl.textContent = author;
-    if (dateEl)   dateEl.textContent = date;
-    if (viewsEl)  viewsEl.textContent = views;
-    if (sumEl)    sumEl.textContent = decodeHtmlEntities(summary);
-
-    // Content is HTML: decode entities, then set as innerHTML
-    if (contentEl) contentEl.innerHTML = decodeHtmlEntities(content);
-
-    // Media rendering
-    if (mediaEl) {
-      mediaEl.innerHTML = '';
-      if (mediaType === 'video' && mediaUrl) {
-        // If it's an external URL (e.g., YouTube), show <video> fallback if same-origin is required
-        const isExternal = /^https?:\/\//i.test(mediaUrl);
-        if (isExternal && /\.(mp4|webm|ogg)$/i.test(mediaUrl)) {
-          mediaEl.innerHTML = '<video controls class="w-100 rounded"><source src="'+ mediaUrl +'"></video>';
-        } else if (!isExternal) {
-          mediaEl.innerHTML = '<video controls class="w-100 rounded"><source src="'+ mediaUrl +'"></video>';
-        } else {
-          mediaEl.innerHTML = '<div class="ratio ratio-16x9"><iframe src="'+ mediaUrl +'" allowfullscreen frameborder="0"></iframe></div>';
-        }
-      } else if (mediaType === 'photo' && mediaUrl) {
-        mediaEl.innerHTML = '<img src="'+ mediaUrl +'" class="img-fluid rounded" alt="">';
-      }
-    }
-
-    // Wire modal like button
-    if (likeBtn) {
-      likeBtn.setAttribute('data-post-id', id);
-      const countEl = likeBtn.querySelector('[data-like-count]');
-      if (countEl) countEl.textContent = String(likes);
-
-      // Re-hydrate icon state for this id (in case it changed in the list)
-      if (window.LM && typeof window.LM.hydrateLikes === 'function') {
-        window.LM.hydrateLikes();
-      } else {
-        // simple local hydrate
-        const liked = localStorage.getItem('lm_like_' + id) === '1';
-        const icon = likeBtn.querySelector('.bi');
-        if (liked) {
-          likeBtn.classList.add('liked');
-          icon && icon.classList.remove('bi-heart');
-          icon && icon.classList.add('bi-heart-fill');
-        } else {
-          likeBtn.classList.remove('liked');
-          icon && icon.classList.add('bi-heart');
-          icon && icon.classList.remove('bi-heart-fill');
-        }
-      }
-    }
-  });
-});
-</script>
-<script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
-<script src="assets/js/custom.js?v=4"></script>
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-  const modalEl = document.getElementById('postModal');
-  if (!modalEl) return;
-
-  function decodeHtmlEntities(str) {
-    const txt = document.createElement('textarea');
-    txt.innerHTML = str == null ? '' : String(str);
-    return txt.value;
-  }
-
-  // Populate modal on SHOW (before it becomes visible)
-  modalEl.addEventListener('show.bs.modal', function (event) {
-    const trigger = event.relatedTarget;
-    if (!trigger) return;
-
-    const id        = trigger.getAttribute('data-id');
-    const title     = trigger.getAttribute('data-title') || '';
-    const author    = trigger.getAttribute('data-author') || 'LM';
-    const date      = trigger.getAttribute('data-date') || '';
-    const views     = parseInt(trigger.getAttribute('data-views') || '0', 10);
-    const likes     = parseInt(trigger.getAttribute('data-likes') || '0', 10);
-    const summary   = trigger.getAttribute('data-summary') || '';
-    const content   = trigger.getAttribute('data-content') || '';
-    const mediaType = (trigger.getAttribute('data-media-type') || '').toLowerCase();
-    const mediaUrl  = trigger.getAttribute('data-media-url') || '';
-
-    // Stash id for the 'shown' handler
-    modalEl.dataset.postId = id;
-
-    const titleEl   = modalEl.querySelector('[data-post-title]');
-    const authorEl  = modalEl.querySelector('[data-post-author]');
-    const dateEl    = modalEl.querySelector('[data-post-date]');
-    const viewsEl   = modalEl.querySelector('[data-post-views]');
-    const sumEl     = modalEl.querySelector('[data-post-summary]');
-    const contentEl = modalEl.querySelector('[data-post-content]');
-    const mediaEl   = modalEl.querySelector('[data-post-media]');
-    const likeBtn   = modalEl.querySelector('[data-modal-like]');
-
-    if (titleEl)  titleEl.textContent = title;
-    if (authorEl) authorEl.textContent = author;
-    if (dateEl)   dateEl.textContent = date;
-    if (viewsEl)  viewsEl.textContent = String(views);
-    if (sumEl)    sumEl.textContent = decodeHtmlEntities(summary);
-    if (contentEl) contentEl.innerHTML = decodeHtmlEntities(content);
-
-    if (mediaEl) {
-      mediaEl.innerHTML = '';
-      if (mediaType === 'video' && mediaUrl) {
-        const isExternal = /^https?:\/\//i.test(mediaUrl);
-        if (isExternal && /\.(mp4|webm|ogg)$/i.test(mediaUrl)) {
-          mediaEl.innerHTML = '<video controls class="w-100 rounded"><source src="'+ mediaUrl +'"></video>';
-        } else if (!isExternal) {
-          mediaEl.innerHTML = '<video controls class="w-100 rounded"><source src="'+ mediaUrl +'"></video>';
-        } else {
-          mediaEl.innerHTML = '<div class="ratio ratio-16x9"><iframe src="'+ mediaUrl +'" allowfullscreen frameborder="0"></iframe></div>';
-        }
-      } else if (mediaType === 'photo' && mediaUrl) {
-        mediaEl.innerHTML = '<img src="'+ mediaUrl +'" class="img-fluid rounded" alt="">';
-      }
-    }
-
-    if (likeBtn) {
-      likeBtn.setAttribute('data-post-id', id);
-      const countEl = likeBtn.querySelector('[data-like-count]');
-      if (countEl) countEl.textContent = String(likes);
-    }
-  });
-
-  // After the modal is fully visible, increment views (once/6h) and update UI
-  modalEl.addEventListener('shown.bs.modal', function (event) {
-    const trigger = event.relatedTarget;
-    const id = modalEl.dataset.postId;
-    if (!id) return;
-
-    const viewsEl = modalEl.querySelector('[data-post-views]');
-
-    function updateViewsUI(latest) {
-      // Update modal
-      if (viewsEl) viewsEl.textContent = String(latest);
-
-      // Update the trigger button’s data and any views label on the card
-      if (trigger) {
-        trigger.setAttribute('data-views', String(latest));
-        const card = trigger.closest('.card');
-        if (card) {
-          const cardViewsEl = card.querySelector('[data-post-views]');
-          if (cardViewsEl) cardViewsEl.textContent = String(latest);
-        }
-      }
-    }
-
-    // Kick the counter (unique-ish via localStorage TTL)
-    if (window.LM && typeof window.LM.trackView === 'function') {
-      const initialViews = parseInt(trigger?.getAttribute('data-views') || '0', 10);
-      window.LM.trackView(id, { initialViews, updateUI: updateViewsUI });
-    }
-  });
-});
-</script>
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-  const modalEl = document.getElementById('postModal');
-  if (!modalEl) return;
-
-  function decodeHtmlEntities(str) {
-    const txt = document.createElement('textarea');
-    txt.innerHTML = str == null ? '' : String(str);
-    return txt.value;
-  }
-
-  function renderMedia(container, type, url, title) {
-    if (!container) return;
-    container.innerHTML = '';
-    if (!url) { container.style.display = 'none'; return; }
-    container.style.display = '';
-    const isExternal = /^https?:\/\//i.test(url);
-    if (type === 'video') {
-      if (isExternal && !url.match(/\.(mp4|mov|m4v|webm|ogv|ogg)(\?|$)/i)) {
-        const iframe = document.createElement('iframe');
-        iframe.src = url;
-        iframe.title = title || 'Video';
-        iframe.allowFullscreen = true;
-        iframe.className = 'w-100';
-        iframe.style.minHeight = '360px';
-        container.appendChild(iframe);
-      } else {
-        const video = document.createElement('video');
-        video.controls = true;
-        video.className = 'w-100 rounded';
-        const source = document.createElement('source');
-        source.src = url;
-        video.appendChild(source);
-        container.appendChild(video);
-      }
-    } else {
-      const img = document.createElement('img');
-      img.src = url;
-      img.alt = title || 'Blog media';
-      img.className = 'img-fluid rounded';
-      container.appendChild(img);
-    }
-  }
-
-  // 1) Populate modal just before it opens
-  modalEl.addEventListener('show.bs.modal', function (event) {
-    const trigger = event.relatedTarget;
-    if (!trigger) return;
-
-    const id        = trigger.getAttribute('data-id');
-    const title     = trigger.getAttribute('data-title') || '';
-    const author    = trigger.getAttribute('data-author') || 'LM';
-    const date      = trigger.getAttribute('data-date') || '';
-    const views     = parseInt(trigger.getAttribute('data-views') || '0', 10);
-    const likes     = parseInt(trigger.getAttribute('data-likes') || '0', 10);
-    const summary   = trigger.getAttribute('data-summary') || '';
-    const content   = trigger.getAttribute('data-content') || '';
-    const mediaType = (trigger.getAttribute('data-media-type') || '').toLowerCase();
-    const mediaUrl  = trigger.getAttribute('data-media-url') || '';
-
-    modalEl.dataset.postId = id;
-
-    const titleEl   = modalEl.querySelector('[data-post-title]');
-    const authorEl  = modalEl.querySelector('[data-post-author]');
-    const dateEl    = modalEl.querySelector('[data-post-date]');
-    const viewsEl   = modalEl.querySelector('[data-post-views]');
-    const sumEl     = modalEl.querySelector('[data-post-summary]');
-    const contentEl = modalEl.querySelector('[data-post-content]');
-    const mediaEl   = modalEl.querySelector('[data-post-media]');
-    const likeBtn   = modalEl.querySelector('[data-modal-like]');
-
-    if (titleEl)  titleEl.textContent = title;
-    if (authorEl) authorEl.textContent = author;
-    if (dateEl)   dateEl.textContent = date;
-    if (viewsEl)  viewsEl.textContent = String(views);  // numeric only
-    if (sumEl)    sumEl.textContent = decodeHtmlEntities(summary);
-    if (contentEl) contentEl.innerHTML = decodeHtmlEntities(content);
-
-    renderMedia(mediaEl, mediaType, mediaUrl, title);
-
-    if (likeBtn) {
-      likeBtn.setAttribute('data-post-id', id);
-      const countEl = likeBtn.querySelector('[data-like-count]');
-      if (countEl) countEl.textContent = String(likes);
-
-      // hydrate icon state from localStorage if your like.js isn't loaded yet
-      const liked = localStorage.getItem('lm_like_' + id) === '1';
-      const icon = likeBtn.querySelector('.bi');
-      if (liked) {
-        likeBtn.classList.add('liked');
-        icon && icon.classList.remove('bi-heart');
-        icon && icon.classList.add('bi-heart-fill');
-      } else {
-        likeBtn.classList.remove('liked');
-        icon && icon.classList.add('bi-heart');
-        icon && icon.classList.remove('bi-heart-fill');
-      }
-    }
-  });
-
-  // 2) After it’s visible, increment views once per 6h per device and update UI
-  modalEl.addEventListener('shown.bs.modal', function (event) {
-    const trigger = event.relatedTarget;
-    const id = modalEl.dataset.postId;
-    if (!id) return;
-
-    const viewsEl = modalEl.querySelector('[data-post-views]');
-    const API_URL = 'api/view.php';
-    const VIEW_TTL_MS = 6 * 60 * 60 * 1000;
-    const LS_KEY = 'lm_viewed_' + id;
-
-    const last = parseInt(localStorage.getItem(LS_KEY) || '0', 10);
-    const freshEnough = Number.isFinite(last) && (Date.now() - last) < VIEW_TTL_MS;
-
-    // If we counted very recently, just reflect what the trigger currently has
-    if (freshEnough) {
-      const latest = parseInt(trigger.getAttribute('data-views') || '0', 10);
-      if (viewsEl) viewsEl.textContent = String(latest);
-      return;
-    }
-
-    fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ post_id: id })
-    })
-    .then(r => r.json())
-    .then(data => {
-      if (!data || !data.ok || typeof data.views !== 'number') return;
-      localStorage.setItem(LS_KEY, String(Date.now()));
-
-      // Update modal
-      if (viewsEl) viewsEl.textContent = String(data.views);
-
-      // Update the trigger button’s data and any views label on the card
-      if (trigger) {
-        trigger.setAttribute('data-views', String(data.views));
-        const card = trigger.closest('.card');
-        if (card) {
-          const cardViewsEl = card.querySelector('[data-post-views]');
-          if (cardViewsEl) cardViewsEl.textContent = String(data.views);
-        }
-      }
-    })
-    .catch(() => {});
-  });
-});
-</script>
-
 </body>
 </html>
 
