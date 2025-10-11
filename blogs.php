@@ -295,22 +295,24 @@ foreach (array_keys($grouped) as $cat) {
   const b64dec = v => { try { return v ? atob(v) : ''; } catch(e) { return ''; } };
   const fmt = n => Number.isFinite(+n) ? (+n).toLocaleString() : n;
 
-  // Filter
+  // ---------- Filtering ----------
   $$( '[data-filter]' ).forEach(btn => {
     btn.addEventListener('click', () => {
-      $$( '[data-filter]' ).forEach(b=>b.classList.toggle('btn-primary', false));
-      $$( '[data-filter]' ).forEach(b=>b.classList.toggle('btn-outline-primary', true));
+      $$( '[data-filter]' ).forEach(b => {
+        b.classList.toggle('btn-primary', false);
+        b.classList.toggle('btn-outline-primary', true);
+      });
       btn.classList.toggle('btn-primary', true);
       btn.classList.toggle('btn-outline-primary', false);
       const f = btn.dataset.filter;
       $$( '[data-blog-card]' ).forEach(card => {
         const c = card.dataset.category;
-        card.style.display = (f==='all' || c===f) ? '' : 'none';
+        card.style.display = (f === 'all' || c === f) ? '' : 'none';
       });
     });
   });
 
-  // Share
+  // ---------- Share ----------
   function share(url, title, text) {
     if (navigator.share) return navigator.share({title, text, url}).catch(()=>{});
     navigator.clipboard?.writeText(url);
@@ -320,9 +322,9 @@ foreach (array_keys($grouped) as $cat) {
     b.addEventListener('click', () => share(b.dataset.shareUrl, b.dataset.shareTitle, b.dataset.shareSummary));
   });
 
-  // Modal
+  // ---------- Modal (read) ----------
   const modalEl = $('#blogModal');
-  const bsModal = new bootstrap.Modal(modalEl);
+  if (!modalEl) return;
   function renderMedia(container, type, url, title) {
     container.innerHTML = '';
     if (!url) return;
@@ -348,69 +350,117 @@ foreach (array_keys($grouped) as $cat) {
   modalEl.addEventListener('show.bs.modal', ev => {
     const t = ev.relatedTarget; if (!t) return;
     const ds = t.dataset;
-    const id = ds.id||'';
-    const title = ds.title||''; const author = ds.author||''; const date = ds.date||'';
-    const cat = ds.categoryLabel||''; const views = parseInt(ds.views||'0',10);
-    const likes = parseInt(ds.likes||'0',10);
-    const summary = b64dec(ds.summaryB64||'');
-    const content = b64dec(ds.contentB64||'');
-    const mtype = (ds.mediaType||'').toLowerCase(); const murl = ds.mediaUrl||'';
-    const shareUrl = ds.shareUrl||''; const shareSummary = b64dec(ds.shareSummaryB64||'') || summary;
+
+    const id     = ds.id || '';
+    const title  = ds.title || '';
+    const author = ds.author || 'LevelMinds Team';
+    const date   = ds.date || '';
+    const catLbl = ds.categoryLabel || '';
+    const views  = parseInt(ds.views || '0', 10);
+    const likes  = parseInt(ds.likes || '0', 10);
+
+    const summary = b64dec(ds.summaryB64 || '') || (ds.summary || '');
+    const content = b64dec(ds.contentB64 || '') || (ds.content || '');
+    const mtype   = (ds.mediaType || '').toLowerCase();
+    const murl    = ds.mediaUrl || '';
+
+    const shareUrl = ds.shareUrl || location.href;
+    const shareSummary = b64dec(ds.shareSummaryB64 || '') || summary;
 
     modalEl.dataset.postId = id;
+
     $('[data-post-title]', modalEl).textContent = title;
-    $('[data-post-author]', modalEl).textContent = author || 'LevelMinds Team';
+    $('[data-post-author]', modalEl).textContent = author;
     $('[data-post-date]', modalEl).textContent = date;
     $('[data-post-views]', modalEl).textContent = fmt(views);
-    $('[data-modal-category]', modalEl).textContent = cat;
+    $('[data-modal-category]', modalEl).textContent = catLbl;
     $('[data-post-summary]', modalEl).textContent = summary;
     $('[data-post-content]', modalEl).innerHTML = content;
+
     const likeBtn = $('[data-modal-like]', modalEl);
-    if (likeBtn) { likeBtn.setAttribute('data-post-id', id); $('[data-like-count]', likeBtn).textContent = fmt(likes); }
+    if (likeBtn) {
+      likeBtn.setAttribute('data-post-id', id);
+      const c = likeBtn.querySelector('[data-like-count]');
+      if (c) c.textContent = fmt(likes);
+    }
+
     $('[data-modal-share]', modalEl).onclick = () => share(shareUrl, title, shareSummary);
     renderMedia($('[data-post-media]', modalEl), mtype, murl, title);
 
-    // track views
-    fetch('api/view.php', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({post_id: id})})
-      .then(r=>r.json()).then(({ok,views:latest})=>{
-        if (ok && Number.isFinite(+latest)) {
-          $('[data-post-views]', modalEl).textContent = fmt(latest);
-          $$(`[data-views-for="${id}"]`).forEach(el => el.textContent = fmt(latest));
-        }
-      }).catch(()=>{});
+    // Track view
+    fetch('api/view.php', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({post_id: id})
+    }).then(r=>r.json()).then(({ok,views:latest})=>{
+      if (ok && Number.isFinite(+latest)) {
+        $('[data-post-views]', modalEl).textContent = fmt(latest);
+        $$(`[data-views-for="${id}"]`).forEach(el => el.textContent = fmt(latest));
+        t.setAttribute('data-views', String(latest));
+      }
+    }).catch(()=>{});
   });
 
-  // Likes (requires email cookie)
-  function getEmail() {
-    const m = document.cookie.match(/(?:^|;)\s*lm_email=([^;]+)/);
+  // ---------- Likes (anonymous via visitor token) ----------
+  function uuid() {
+    if (crypto?.randomUUID) return crypto.randomUUID();
+    // fallback
+    const a = crypto?.getRandomValues ? crypto.getRandomValues(new Uint8Array(16)) : Array.from({length:16},()=>Math.random()*256|0);
+    // hex
+    return [...a].map(b => ('0' + b.toString(16)).slice(-2)).join('');
+  }
+  function setCookie(name, val, days) {
+    const expires = new Date(Date.now()+days*864e5).toUTCString();
+    document.cookie = `${name}=${encodeURIComponent(val)};expires=${expires};path=/`;
+  }
+  function getCookie(name) {
+    const m = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()[\]\\/+^])/g,'\\$1') + '=([^;]*)'));
     return m ? decodeURIComponent(m[1]) : '';
   }
-  async function ensureEmail() {
-    let email = getEmail();
-    if (!email) {
-      email = prompt('Enter your email to like (subscribers only):') || '';
-      email = email.trim();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return '';
-      document.cookie = 'lm_email='+encodeURIComponent(email)+';path=/;max-age='+(3600*24*365);
+  function getVisitorToken() {
+    try {
+      let t = localStorage.getItem('lm_vt') || getCookie('lm_vt') || '';
+      if (!t) {
+        t = uuid().replace(/-/g,'');                // 32 hex chars
+        localStorage.setItem('lm_vt', t);
+        setCookie('lm_vt', t, 365);
+      }
+      return t;
+    } catch(e) {
+      // storage blocked — fallback cookie only
+      let t = getCookie('lm_vt');
+      if (!t) { t = uuid().replace(/-/g,''); setCookie('lm_vt', t, 365); }
+      return t;
     }
-    return email;
   }
+
   async function toggleLike(btn) {
     const id = btn.getAttribute('data-post-id');
-    const email = await ensureEmail(); if (!email) return;
-    const r = await fetch('api/like.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({post_id:id,email})});
-    const json = await r.json().catch(()=>({}));
-    if (json && json.ok) {
-      $$(`[data-like-btn][data-post-id="${id}"]`).forEach(b => {
-        const el = b.querySelector('[data-like-count]'); if (el) el.textContent = fmt(json.likes);
+    const token = getVisitorToken();
+    try {
+      const r = await fetch('api/like.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({post_id: id, visitor_token: token})
       });
-    } else {
-      alert(json?.message || 'Unable to like right now.');
+      const json = await r.json();
+      if (json?.ok) {
+        // Update every like count for the same post (cards + modal)
+        $$(`[data-like-btn][data-post-id="${id}"]`).forEach(b => {
+          const el = b.querySelector('[data-like-count]');
+          if (el) el.textContent = fmt(json.likes);
+        });
+      } else {
+        alert(json?.message || 'Unable to like right now.');
+      }
+    } catch(e) {
+      alert('Network error. Please try again.');
     }
   }
+
   $$( '[data-like-btn]' ).forEach(b => b.addEventListener('click', () => toggleLike(b)));
 
-  // Open modal by URL ?post=ID
+  // ---------- Open modal if ?post=ID ----------
   const params = new URLSearchParams(location.search);
   const initial = params.get('post');
   if (initial) {
@@ -419,5 +469,6 @@ foreach (array_keys($grouped) as $cat) {
   }
 })();
 </script>
+
 </body>
 </html>
