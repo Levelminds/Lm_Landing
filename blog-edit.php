@@ -302,6 +302,20 @@ try {
           <?php endif; ?>
         </div>
         <div class="col-md-3">
+          <label class="form-label fw-semibold">Audience Category *</label>
+          <?php $currentCategory = $post['category'] ?? 'general'; ?>
+          <?php if ($hasCategoryColumn): ?>
+          <select name="category" class="form-select" required>
+            <option value="teachers" <?php echo $currentCategory === 'teachers' ? 'selected' : ''; ?>>For Teachers</option>
+            <option value="schools" <?php echo $currentCategory === 'schools' ? 'selected' : ''; ?>>For Schools</option>
+            <option value="general" <?php echo $currentCategory === 'general' ? 'selected' : ''; ?>>General Insights</option>
+          </select>
+          <?php else: ?>
+          <input type="hidden" name="category" value="general">
+          <div class="form-text text-muted">Categories will default to General until the database is updated.</div>
+          <?php endif; ?>
+        </div>
+        <div class="col-md-3">
           <label class="form-label fw-semibold">Blog Type *</label>
           <select name="media_type" class="form-select" required>
             <option value="photo" <?php echo $post['media_type'] === 'photo' ? 'selected' : ''; ?>>Photo Blog</option>
