@@ -10,6 +10,9 @@ $dbname = 'u420143207_LM_landing';
 $username = 'u420143207_lmlanding';
 $password = 'Levelminds@2024';
 
+$html5Flag = defined('ENT_HTML5') ? ENT_HTML5 : ENT_COMPAT;
+$substituteFlag = defined('ENT_SUBSTITUTE') ? ENT_SUBSTITUTE : 0;
+
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 if ($id <= 0) {
     header('Location: blogs-manage.php');
@@ -48,6 +51,19 @@ function ensureBlogCategoryColumn(PDO $pdo)
     }
 
     return blogCategoryColumnExists($pdo);
+function ensureBlogCategoryColumn(PDO $pdo)
+{
+    try {
+        $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
+        if ($check && $check->fetch()) {
+            return true;
+        }
+
+        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
+        return true;
+    } catch (PDOException $e) {
+        return false;
+    }
 }
 
 try {
@@ -89,6 +105,8 @@ try {
                 $category = 'general';
             }
         } else {
+        $allowedCategories = ['teachers', 'schools', 'general'];
+        if (!in_array($category, $allowedCategories, true)) {
             $category = 'general';
         }
 
@@ -132,12 +150,15 @@ try {
             if (!$error) {
                 $sql = 'UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id';
                 $params = [
+                $update = $pdo->prepare('UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, category = :category, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id');
+                $update->execute([
                     'title' => $title,
                     'author' => $author,
                     'summary' => $summary,
                     'content' => $content,
                     'media_type' => $mediaType,
                     'media_url' => $mediaUrl,
+                    'category' => $category,
                     'status' => $status,
                     'views' => $views,
                     'likes' => $likes,
@@ -165,14 +186,29 @@ try {
                     }
                 }
 
+                if ($hasCategoryColumn) {
+                    $sql = 'UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, category = :category, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id';
+                    $params['category'] = $category;
+                }
+
+                $update = $pdo->prepare($sql);
+                $update->execute($params);
+
                 $stmt->execute(['id' => $id]);
                 $post = $stmt->fetch(PDO::FETCH_ASSOC);
+                if ($post && !$hasCategoryColumn) {
+                    $post['category'] = 'general';
+                }
+                if ($post && !$hasStatusColumn) {
+                    $post['status'] = 'published';
+                }
                 $message = 'Blog post updated.';
             }
         }
     }
-} catch (PDOException $e) {
-    $error = 'Database error: ' . htmlspecialchars($e->getMessage());
+} catch (Throwable $e) {
+    error_log('[blog-edit.php] ' . $e->getMessage());
+    $error = 'Database error: ' . adminEscape($e->getMessage());
 }
 ?>
 <!DOCTYPE html>
@@ -194,6 +230,18 @@ try {
     .admin-nav nav a.active, .admin-nav nav a:hover { color: #3C8DFF; }
     .admin-card { background: #ffffff; border-radius: 18px; box-shadow: 0 20px 60px rgba(15, 46, 91, 0.08); padding: 32px; }
     textarea.js-rich-editor { min-height: 180px; }
+    .rich-editor { border: 1px solid #dbe4f3; border-radius: 14px; overflow: hidden; background: #ffffff; box-shadow: inset 0 1px 2px rgba(15, 46, 91, 0.06); }
+    .rich-toolbar { display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.45rem 0.55rem; background: #f0f5ff; border-bottom: 1px solid #dbe4f3; }
+    .rich-toolbar button { border: none; background: transparent; color: #405275; border-radius: 8px; width: 2.2rem; height: 2.2rem; display: inline-flex; align-items: center; justify-content: center; font-size: 1rem; transition: background 0.2s ease, color 0.2s ease; }
+    .rich-toolbar button:focus { outline: none; box-shadow: 0 0 0 2px rgba(60, 141, 255, 0.25); }
+    .rich-toolbar button:hover, .rich-toolbar button.is-active { background: rgba(60, 141, 255, 0.12); color: #2a62d5; }
+    .rich-toolbar select { border-radius: 8px; border: 1px solid #c7d3e8; padding: 0.25rem 0.5rem; background: #ffffff; color: #2f3f5d; font-size: 0.85rem; }
+    .rich-content { min-height: 160px; padding: 0.9rem; font-size: 0.98rem; line-height: 1.6; color: #23324d; }
+    .rich-content:focus { outline: none; box-shadow: inset 0 0 0 2px rgba(60, 141, 255, 0.18); }
+    .rich-content[data-empty="true"]::before { content: attr(data-placeholder); color: #8ea2c2; pointer-events: none; }
+    .rich-content a { color: #2a62d5; text-decoration: underline; }
+    .rich-content ul, .rich-content ol { padding-left: 1.25rem; margin-bottom: 0.75rem; }
+    textarea.js-rich-editor.js-rich-source-hidden { display: none !important; }
   </style>
 </head>
 <body>
@@ -213,17 +261,45 @@ try {
 
     <div class="admin-card">
       <h1 class="h4 mb-3" style="font-weight: 700; color: #0F1D3B;">Edit blog post</h1>
-      <?php if ($message): ?><div class="alert alert-success"><?php echo htmlspecialchars($message); ?></div><?php endif; ?>
-      <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
+      <?php if ($message): ?><div class="alert alert-success"><?php echo adminEscape($message); ?></div><?php endif; ?>
+      <?php if ($error): ?><div class="alert alert-danger"><?php echo adminEscape($error); ?></div><?php endif; ?>
 
       <form method="POST" class="row g-4" enctype="multipart/form-data" data-blog-form>
         <div class="col-12">
           <label class="form-label fw-semibold">Title *</label>
-          <input type="text" name="title" class="form-control" value="<?php echo htmlspecialchars($post['title']); ?>" required>
+          <input type="text" name="title" class="form-control" value="<?php echo adminEscape($post['title']); ?>" required>
         </div>
         <div class="col-md-3">
           <label class="form-label fw-semibold">Author</label>
-          <input type="text" name="author" class="form-control" value="<?php echo htmlspecialchars($post['author']); ?>">
+          <input type="text" name="author" class="form-control" value="<?php echo adminEscape($post['author']); ?>">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Audience Category *</label>
+          <?php $currentCategory = $post['category'] ?? 'general'; ?>
+          <?php if ($hasCategoryColumn): ?>
+          <select name="category" class="form-select" required>
+            <option value="teachers" <?php echo $currentCategory === 'teachers' ? 'selected' : ''; ?>>For Teachers</option>
+            <option value="schools" <?php echo $currentCategory === 'schools' ? 'selected' : ''; ?>>For Schools</option>
+            <option value="general" <?php echo $currentCategory === 'general' ? 'selected' : ''; ?>>General Insights</option>
+          </select>
+          <?php else: ?>
+          <input type="hidden" name="category" value="general">
+          <div class="form-text text-muted">Categories will default to General until the database is updated.</div>
+          <?php endif; ?>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Audience Category *</label>
+          <?php $currentCategory = $post['category'] ?? 'general'; ?>
+          <?php if ($hasCategoryColumn): ?>
+          <select name="category" class="form-select" required>
+            <option value="teachers" <?php echo $currentCategory === 'teachers' ? 'selected' : ''; ?>>For Teachers</option>
+            <option value="schools" <?php echo $currentCategory === 'schools' ? 'selected' : ''; ?>>For Schools</option>
+            <option value="general" <?php echo $currentCategory === 'general' ? 'selected' : ''; ?>>General Insights</option>
+          </select>
+          <?php else: ?>
+          <input type="hidden" name="category" value="general">
+          <div class="form-text text-muted">Categories will default to General until the database is updated.</div>
+          <?php endif; ?>
         </div>
         <div class="col-md-3">
           <label class="form-label fw-semibold">Audience Category *</label>
@@ -246,16 +322,20 @@ try {
             <option value="video" <?php echo $post['media_type'] === 'video' ? 'selected' : ''; ?>>Video Blog</option>
           </select>
         </div>
+        <?php if ($hasStatusColumn): ?>
         <div class="col-md-3">
           <label class="form-label fw-semibold">Status *</label>
           <select name="status" class="form-select" required>
-            <option value="published" <?php echo $post['status'] === 'published' ? 'selected' : ''; ?>>Published</option>
-            <option value="draft" <?php echo $post['status'] === 'draft' ? 'selected' : ''; ?>>Draft</option>
+            <option value="published" <?php echo ($post['status'] ?? 'published') === 'published' ? 'selected' : ''; ?>>Published</option>
+            <option value="draft" <?php echo ($post['status'] ?? 'published') === 'draft' ? 'selected' : ''; ?>>Draft</option>
           </select>
         </div>
+        <?php else: ?>
+        <input type="hidden" name="status" value="published">
+        <?php endif; ?>
         <div class="col-12">
           <label class="form-label fw-semibold">Image or Video URL *</label>
-          <input type="url" name="media_url" class="form-control" value="<?php echo htmlspecialchars($post['media_url']); ?>" placeholder="https://...">
+          <input type="url" name="media_url" class="form-control" value="<?php echo adminEscape($post['media_url']); ?>" placeholder="https://...">
           <small class="text-muted">Provide a hosted image or video URL (e.g. CDN, YouTube). Uploading a file below will override this field.</small>
         </div>
         <div class="col-12" data-media-field>
@@ -297,6 +377,11 @@ try {
         <div class="col-12">
           <label class="form-label fw-semibold">Main Content *</label>
           <textarea name="content" class="form-control js-rich-editor" rows="8" placeholder="Share the full story, add headings, and include helpful links." required><?php echo htmlspecialchars_decode($post['content'] ?? '', ENT_QUOTES); ?></textarea>
+          <textarea name="summary" class="form-control js-rich-editor" rows="2" required><?php echo htmlspecialchars_decode($post['summary'] ?? '', ENT_QUOTES); ?></textarea>
+        </div>
+        <div class="col-12">
+          <label class="form-label fw-semibold">Main Content *</label>
+          <textarea name="content" class="form-control js-rich-editor" rows="8" required><?php echo htmlspecialchars_decode($post['content'] ?? '', ENT_QUOTES); ?></textarea>
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Views</label>
@@ -385,6 +470,9 @@ try {
   <script src="assets/js/admin-media-tools.js"></script>
   <script>
     document.addEventListener('DOMContentLoaded', function () {
+  <script src="https://cdn.tiny.cloud/1/no-api-key/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
       if (typeof tinymce === 'undefined') {
         return;
       }
@@ -413,6 +501,22 @@ try {
 
       document.querySelectorAll('form').forEach(function (form) {
         form.addEventListener('submit', function () {
+        menubar: false,
+        branding: false,
+        plugins: 'lists link table image media code fullscreen autoresize',
+        toolbar: 'undo redo | blocks | bold italic underline | alignleft aligncenter alignright alignjustify | bullist numlist | link table | removeformat | code fullscreen',
+        min_height: 220,
+        autoresize_bottom_margin: 16,
+        convert_urls: false,
+        setup: (editor) => {
+          editor.on('change keyup setcontent', () => {
+            editor.save();
+          });
+        }
+      });
+
+      document.querySelectorAll('form').forEach((form) => {
+        form.addEventListener('submit', () => {
           if (typeof tinymce !== 'undefined') {
             tinymce.triggerSave();
           }
