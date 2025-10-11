@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 session_start();
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     header('Location: admin.php');
@@ -41,55 +41,37 @@ try {
         $mediaType = $_POST['media_type'] ?? 'photo';
         $mediaUrl = trim($_POST['media_url'] ?? '');
         $status = $_POST['status'] ?? 'published';
-        $category = $_POST['category'] ?? ($post['category'] ?? 'general');
         $views = max(0, (int)($_POST['views'] ?? $post['views']));
         $likes = max(0, (int)($_POST['likes'] ?? $post['likes']));
         $responses = max(0, (int)($_POST['responses'] ?? $post['responses']));
 
-        $allowedCategories = ['teachers', 'schools', 'general'];
-        if (!in_array($category, $allowedCategories, true)) {
-            $category = 'general';
-        }
-
         if ($title === '' || $summary === '' || $content === '') {
             $error = 'Please fill in the required fields (title, summary, and content).';
         } else {
-            if (isset($_FILES['media_file']) && $_FILES['media_file']['error'] !== UPLOAD_ERR_NO_FILE) {
-                if ($_FILES['media_file']['error'] !== UPLOAD_ERR_OK) {
-                    $error = 'Unable to upload file. Please try again.';
+            if ($mediaType === 'photo' && isset($_FILES['media_file']) && $_FILES['media_file']['error'] === UPLOAD_ERR_OK) {
+                $allowed = ['jpg','jpeg','png','gif','webp'];
+                $ext = strtolower(pathinfo($_FILES['media_file']['name'], PATHINFO_EXTENSION));
+                if (!in_array($ext, $allowed, true)) {
+                    $error = 'Please upload a JPG, PNG, GIF, or WEBP image.';
                 } else {
-                    $ext = strtolower(pathinfo($_FILES['media_file']['name'], PATHINFO_EXTENSION));
-                    $allowed = $mediaType === 'photo'
-                        ? ['jpg','jpeg','png','gif','webp']
-                        : ['mp4','mov','m4v','webm','ogv','ogg'];
-
-                    if (!in_array($ext, $allowed, true)) {
-                        $error = $mediaType === 'photo'
-                            ? 'Please upload a JPG, PNG, GIF, or WEBP image.'
-                            : 'Please upload an MP4, MOV, M4V, WEBM, or OGG video.';
-                    } else {
-                        $uploadDir = __DIR__ . '/uploads/blogs/';
-                        if (!is_dir($uploadDir)) {
-                            mkdir($uploadDir, 0755, true);
-                        }
-                        $prefix = $mediaType === 'video' ? 'video_' : 'blog_';
-                        $filename = uniqid($prefix, true) . '.' . $ext;
-                        $destination = $uploadDir . $filename;
-                        if (move_uploaded_file($_FILES['media_file']['tmp_name'], $destination)) {
-                            $mediaUrl = 'uploads/blogs/' . $filename;
-                        } else {
-                            $error = 'Unable to upload file. Please try again.';
-                        }
+                    $uploadDir = __DIR__ . '/uploads/blogs/';
+                    if (!is_dir($uploadDir)) {
+                        mkdir($uploadDir, 0755, true);
+                    }
+                    $filename = uniqid('blog_', true) . '.' . $ext;
+                    $destination = $uploadDir . $filename;
+                    if (move_uploaded_file($_FILES['media_file']['tmp_name'], $destination)) {
+                        $mediaUrl = 'uploads/blogs/' . $filename;
                     }
                 }
             }
 
             if (!$error && $mediaUrl === '') {
-                $error = 'Provide an image, video link, or upload for this post.';
+                $error = 'Provide an image or video URL for this post.';
             }
 
             if (!$error) {
-                $update = $pdo->prepare('UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, category = :category, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id');
+                $update = $pdo->prepare('UPDATE blog_posts SET title = :title, author = :author, summary = :summary, content = :content, media_type = :media_type, media_url = :media_url, status = :status, views = :views, likes = :likes, responses = :responses, updated_at = NOW() WHERE id = :id');
                 $update->execute([
                     'title' => $title,
                     'author' => $author,
@@ -97,7 +79,6 @@ try {
                     'content' => $content,
                     'media_type' => $mediaType,
                     'media_url' => $mediaUrl,
-                    'category' => $category,
                     'status' => $status,
                     'views' => $views,
                     'likes' => $likes,
@@ -159,18 +140,9 @@ try {
           <label class="form-label fw-semibold">Title *</label>
           <input type="text" name="title" class="form-control" value="<?php echo htmlspecialchars($post['title']); ?>" required>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-6">
           <label class="form-label fw-semibold">Author</label>
           <input type="text" name="author" class="form-control" value="<?php echo htmlspecialchars($post['author']); ?>">
-        </div>
-        <div class="col-md-3">
-          <label class="form-label fw-semibold">Audience Category *</label>
-          <?php $currentCategory = $post['category'] ?? 'general'; ?>
-          <select name="category" class="form-select" required>
-            <option value="teachers" <?php echo $currentCategory === 'teachers' ? 'selected' : ''; ?>>For Teachers</option>
-            <option value="schools" <?php echo $currentCategory === 'schools' ? 'selected' : ''; ?>>For Schools</option>
-            <option value="general" <?php echo $currentCategory === 'general' ? 'selected' : ''; ?>>General Insights</option>
-          </select>
         </div>
         <div class="col-md-3">
           <label class="form-label fw-semibold">Blog Type *</label>
@@ -189,36 +161,23 @@ try {
         <div class="col-12">
           <label class="form-label fw-semibold">Image or Video URL *</label>
           <input type="url" name="media_url" class="form-control" value="<?php echo htmlspecialchars($post['media_url']); ?>" placeholder="https://...">
-          <small class="text-muted">Provide a hosted image or video URL (e.g. CDN, YouTube). Uploading a file below will override this field.</small>
+          <small class="text-muted">Provide a cover image URL for photo blogs or an embeddable video URL (e.g. YouTube embed). You can also upload a new image below.</small>
         </div>
         <div class="col-12">
-          <label class="form-label fw-semibold">Upload new media file (optional)</label>
-          <input type="file" name="media_file" class="form-control" accept="image/*,video/*">
-          <small class="text-muted">Supported formats: JPG, JPEG, PNG, GIF, WEBP, MP4, MOV, M4V, WEBM, OGG.</small>
-          <?php if ($post['media_type'] === 'photo' && $post['media_url']): ?>
+          <label class="form-label fw-semibold">Upload new image (optional)</label>
+          <input type="file" name="media_file" class="form-control" accept="image/*">
+          <?php if ($post['media_type'] === 'photo'): ?>
           <small class="text-muted">Current image:</small>
-          <div class="mt-2"><img src="<?php echo htmlspecialchars($post['media_url']); ?>" alt="Current image" style="max-height: 120px; border-radius: 12px;"></div>
-          <?php elseif ($post['media_type'] === 'video' && $post['media_url']): ?>
-          <small class="text-muted">Current video:</small>
-          <?php if (filter_var($post['media_url'], FILTER_VALIDATE_URL)): ?>
-          <div class="ratio ratio-16x9 mt-2">
-            <iframe src="<?php echo htmlspecialchars($post['media_url']); ?>" title="Current video" allowfullscreen></iframe>
-          </div>
-          <?php else: ?>
-          <video controls class="mt-2 w-100" style="border-radius: 12px;">
-            <source src="<?php echo htmlspecialchars($post['media_url']); ?>">
-            Your browser does not support the video tag.
-          </video>
-          <?php endif; ?>
+          <div class="mt-2"><img src="<?php echo htmlspecialchars($post['media_url']); ?>" alt="Current" style="max-height: 120px; border-radius: 12px;"></div>
           <?php endif; ?>
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Short Summary *</label>
-          <textarea name="summary" class="form-control js-rich-editor" rows="2" required><?php echo htmlspecialchars_decode($post['summary'] ?? '', ENT_QUOTES); ?></textarea>
+          <textarea name="summary" class="form-control" rows="2" required><?php echo htmlspecialchars($post['summary']); ?></textarea>
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Main Content *</label>
-          <textarea name="content" class="form-control js-rich-editor" rows="8" required><?php echo htmlspecialchars_decode($post['content'] ?? '', ENT_QUOTES); ?></textarea>
+          <textarea name="content" class="form-control" rows="8" required><?php echo htmlspecialchars($post['content']); ?></textarea>
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Views</label>
@@ -243,39 +202,11 @@ try {
   <div data-global-footer></div>
   <script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
   <script src="assets/js/footer.js"></script>
-  <script src="https://cdn.tiny.cloud/1/no-api-key/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
-  <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      if (typeof tinymce === 'undefined') {
-        return;
-      }
-
-      tinymce.init({
-        selector: 'textarea.js-rich-editor',
-        menubar: false,
-        branding: false,
-        plugins: 'lists link table image media code fullscreen autoresize',
-        toolbar: 'undo redo | blocks | bold italic underline | alignleft aligncenter alignright alignjustify | bullist numlist | link table | removeformat | code fullscreen',
-        min_height: 220,
-        autoresize_bottom_margin: 16,
-        convert_urls: false,
-        setup: (editor) => {
-          editor.on('change keyup setcontent', () => {
-            editor.save();
-          });
-        }
-      });
-
-      document.querySelectorAll('form').forEach((form) => {
-        form.addEventListener('submit', () => {
-          if (typeof tinymce !== 'undefined') {
-            tinymce.triggerSave();
-          }
-        });
-      });
-    });
-  </script>
 </body>
 </html>
+
+
+
+
 
 
