@@ -559,45 +559,6 @@ document.addEventListener('DOMContentLoaded', countdownInit);
 
   let activeShareMenu = null;
 
-  function readCookie(name) {
-    if (!document.cookie) {
-      return null;
-    }
-    const escaped = name.replace(/([.$?*|{}()\[\]\\\/\+^])/g, '\\$1');
-    const match = document.cookie.match(new RegExp('(?:^|; )' + escaped + '=([^;]*)'));
-    return match ? decodeURIComponent(match[1]) : null;
-  }
-
-  function writeCookie(name, value, days = 365) {
-    const maxAge = Math.max(1, days * 24 * 60 * 60);
-    document.cookie = `${name}=${encodeURIComponent(value)};path=/;max-age=${maxAge};SameSite=Lax`;
-  }
-
-  function removeCookie(name) {
-    document.cookie = `${name}=;path=/;expires=Thu, 01 Jan 1970 00:00:01 GMT;SameSite=Lax`;
-  }
-
-  function readLocal(key) {
-    try {
-      return localStorage.getItem(key);
-    } catch (error) {
-      return null;
-    }
-  }
-
-  function writeLocal(key, value) {
-    try {
-      if (value === null) {
-        localStorage.removeItem(key);
-      } else {
-        localStorage.setItem(key, value);
-      }
-      return true;
-    } catch (error) {
-      return false;
-    }
-  }
-
   function decodeBase64(value) {
     if (!value) {
       return '';
@@ -626,34 +587,50 @@ document.addEventListener('DOMContentLoaded', countdownInit);
     return 'lm_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   }
 
-  function getVisitorToken() {
-    let token = null;
-    token = readLocal(TOKEN_KEY);
-    if (!token) {
-      token = readCookie(TOKEN_KEY);
+// ========== LM Blogs: Visitor-friendly Like Button Logic (cards + modal, DB-backed with graceful fallback) ==========
+(function() {
+  const EMAIL_KEY = 'lmEmail';
+  const TOKEN_KEY = 'lmVisitorToken';
+  const LIKE_STATE_PREFIX = 'lm_like_state_';
+  const API_URL = 'api/like.php'; // adjust if your API lives elsewhere
+
+  function getEmail() {
+    return (localStorage.getItem(EMAIL_KEY) || '').trim();
+  }
+
+  function setEmail(email) {
+    if (email) {
+      localStorage.setItem(EMAIL_KEY, email.trim());
     }
+  }
+
+  function generateToken() {
+    if (window.crypto && crypto.getRandomValues) {
+      const array = new Uint8Array(16);
+      crypto.getRandomValues(array);
+      return Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    return 'lm_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+
+  function getVisitorToken() {
+    let token = localStorage.getItem(TOKEN_KEY);
     if (!token) {
       token = generateToken();
-    }
-    if (token) {
-      writeLocal(TOKEN_KEY, token);
-      writeCookie(TOKEN_KEY, token);
+      localStorage.setItem(TOKEN_KEY, token);
     }
     return token;
   }
 
   function isLocallyLiked(postId) {
     const newKey = LIKE_STATE_PREFIX + postId;
-    if (readLocal(newKey) === '1') {
-      return true;
-    }
-    if (readCookie(newKey) === '1') {
-      writeLocal(newKey, '1');
+    if (localStorage.getItem(newKey) === '1') {
       return true;
     }
     const legacyKey = 'lm_like_' + postId;
-    if (readLocal(legacyKey) === '1' || readCookie(legacyKey) === '1') {
-      setLocalLike(postId, true);
+    if (localStorage.getItem(legacyKey) === '1') {
+      localStorage.setItem(newKey, '1');
+      localStorage.removeItem(legacyKey);
       return true;
     }
     return false;
@@ -662,14 +639,11 @@ document.addEventListener('DOMContentLoaded', countdownInit);
   function setLocalLike(postId, liked) {
     const key = LIKE_STATE_PREFIX + postId;
     if (liked) {
-      writeLocal(key, '1');
-      writeCookie(key, '1');
+      localStorage.setItem(key, '1');
     } else {
-      writeLocal(key, null);
-      removeCookie(key);
+      localStorage.removeItem(key);
     }
-    writeLocal('lm_like_' + postId, null);
-    removeCookie('lm_like_' + postId);
+    localStorage.removeItem('lm_like_' + postId);
   }
 
   function showToast(message) {
@@ -711,6 +685,32 @@ document.addEventListener('DOMContentLoaded', countdownInit);
         icon.classList.add('bi-heart');
         icon.classList.remove('bi-heart-fill');
       }
+  // Capture newsletter email so we can associate it with likes later (optional)
+  document.addEventListener('submit', function(e) {
+    const form = e.target;
+    if (form.closest && form.closest('#newsletter')) {
+      const emailInput = form.querySelector('input[type="email"], input[name="email"]');
+      if (emailInput && emailInput.value) {
+        setEmail(emailInput.value);
+      }
+      showToast('🎉 Thanks for subscribing!');
+    }
+  }
+
+  function renderLikedState(btn, liked) {
+    const icon = btn.querySelector('.bi');
+    if (liked) {
+      btn.classList.add('liked');
+      if (icon) {
+        icon.classList.add('bi-heart-fill');
+        icon.classList.remove('bi-heart');
+      }
+    } else {
+      btn.classList.remove('liked');
+      if (icon) {
+        icon.classList.add('bi-heart');
+        icon.classList.remove('bi-heart-fill');
+      }
     }
   }
 
@@ -723,10 +723,14 @@ document.addEventListener('DOMContentLoaded', countdownInit);
   }
 
   async function toggleLikeServer(postId) {
+  async function toggleLikeServer(postId, email) {
     const payload = {
       post_id: postId,
       visitor_token: getVisitorToken()
     };
+    if (email) {
+      payload.email = email;
+    }
     const res = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -823,6 +827,7 @@ document.addEventListener('DOMContentLoaded', countdownInit);
     }
     textarea.remove();
     return success;
+    return data; // { liked: bool, likes: number }
   }
 
   document.addEventListener('click', async function(e) {
@@ -844,6 +849,16 @@ document.addEventListener('DOMContentLoaded', countdownInit);
 
       if (Number.isFinite(likes) && countEl) {
         countEl.textContent = likes.toLocaleString();
+    const countEl = btn.querySelector('[data-like-count]');
+    const email = getEmail();
+
+    try {
+      const result = await toggleLikeServer(postId, email);
+      const liked = !!result.liked;
+      const likes = result.likes;
+
+      if (countEl) {
+        countEl.textContent = Number(likes).toLocaleString();
       }
       renderLikedState(btn, liked);
       setLocalLike(postId, liked);
@@ -935,6 +950,24 @@ document.addEventListener('DOMContentLoaded', countdownInit);
   window.LM = window.LM || {};
   window.LM.hydrateLikes = hydrateLikes;
   window.LM.getVisitorToken = getVisitorToken;
+      let count = parseInt(countEl && countEl.textContent ? countEl.textContent.replace(/,/g, '') : '0', 10);
+      const liked = !isLocallyLiked(postId);
+      setLocalLike(postId, liked);
+      count = liked ? count + 1 : Math.max(0, count - 1);
+      if (countEl) {
+        countEl.textContent = Number(count).toLocaleString();
+      }
+      renderLikedState(btn, liked);
+      showToast(err && err.message ? err.message : 'Saved locally (offline).');
+
+      document.dispatchEvent(new CustomEvent('lm:likes-updated', {
+        detail: { postId: postId, likes: count, liked: liked }
+      }));
+    }
+  });
+
+  window.LM = window.LM || {};
+  window.LM.hydrateLikes = hydrateLikes;
 
   document.addEventListener('DOMContentLoaded', hydrateLikes);
 })();
