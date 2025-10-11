@@ -103,30 +103,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Please fill in the required fields (title, summary, and content).';
     } else {
         if (isset($_FILES['media_file']) && $_FILES['media_file']['error'] !== UPLOAD_ERR_NO_FILE) {
-            if ($_FILES['media_file']['error'] !== UPLOAD_ERR_OK) {
+            $file = $_FILES['media_file'];
+            if ($file['error'] !== UPLOAD_ERR_OK) {
                 $error = 'Unable to upload file. Please try again.';
             } else {
-                $ext = strtolower(pathinfo($_FILES['media_file']['name'], PATHINFO_EXTENSION));
-                $allowed = $mediaType === 'photo'
-                    ? ['jpg','jpeg','png','gif','webp']
-                    : ['mp4','mov','m4v','webm','ogv','ogg'];
-
-                if (!in_array($ext, $allowed, true)) {
-                    $error = $mediaType === 'photo'
-                        ? 'Please upload a JPG, PNG, GIF, or WEBP image.'
-                        : 'Please upload an MP4, MOV, M4V, WEBM, or OGG video.';
+                $tmpPath = $file['tmp_name'];
+                if (!is_uploaded_file($tmpPath)) {
+                    $error = 'File upload was not recognised. Please try again.';
                 } else {
+                    $detectedMime = detectMimeType($tmpPath) ?? ($file['type'] ?? '');
+                    $imageMimeMap = [
+                        'image/jpeg' => 'jpg',
+                        'image/pjpeg' => 'jpg',
+                        'image/png' => 'png',
+                        'image/gif' => 'gif',
+                        'image/webp' => 'webp',
+                    ];
+                    $videoMimeMap = [
+                        'video/mp4' => 'mp4',
+                        'video/quicktime' => 'mov',
+                        'video/x-m4v' => 'm4v',
+                        'video/webm' => 'webm',
+                        'video/ogg' => 'ogv',
+                    ];
+
                     $uploadDir = __DIR__ . '/uploads/blogs/';
-                    if (!is_dir($uploadDir)) {
-                        mkdir($uploadDir, 0755, true);
-                    }
-                    $prefix = $mediaType === 'video' ? 'video_' : 'blog_';
-                    $filename = uniqid($prefix, true) . '.' . $ext;
-                    $destination = $uploadDir . $filename;
-                    if (move_uploaded_file($_FILES['media_file']['tmp_name'], $destination)) {
-                        $mediaUrl = 'uploads/blogs/' . $filename;
+                    ensureUploadDirectory($uploadDir);
+
+                    if ($mediaType === 'photo') {
+                        if (!isset($imageMimeMap[$detectedMime])) {
+                            $extGuess = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+                            $fallbackMime = array_search($extGuess, $imageMimeMap, true);
+                            if ($fallbackMime !== false) {
+                                $detectedMime = $fallbackMime;
+                            }
+                        }
+
+                        if (!isset($imageMimeMap[$detectedMime])) {
+                            $error = 'Please upload a JPG, PNG, GIF, or WEBP image.';
+                        } else {
+                            $extension = $imageMimeMap[$detectedMime];
+                            $prefix = 'blog_';
+                            $filename = uniqid($prefix, true) . '.' . $extension;
+                            $destination = $uploadDir . $filename;
+
+                            if (!move_uploaded_file($tmpPath, $destination)) {
+                                $error = 'Unable to upload file. Please try again.';
+                            } else {
+                                $processingMime = $detectedMime === 'image/pjpeg' ? 'image/jpeg' : $detectedMime;
+                                resizeImageIfNeeded($destination, $processingMime, 1600);
+                                $mediaUrl = 'uploads/blogs/' . $filename;
+                            }
+                        }
                     } else {
-                        $error = 'Unable to upload file. Please try again.';
+                        if (!isset($videoMimeMap[$detectedMime])) {
+                            $extGuess = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+                            $fallbackMime = array_search($extGuess, $videoMimeMap, true);
+                            if ($fallbackMime !== false) {
+                                $detectedMime = $fallbackMime;
+                            }
+                        }
+
+                        if (!isset($videoMimeMap[$detectedMime])) {
+                            $error = 'Please upload an MP4, MOV, M4V, WEBM, or OGG video.';
+                        } else {
+                            $extension = $videoMimeMap[$detectedMime];
+                            $prefix = 'video_';
+                            $filename = uniqid($prefix, true) . '.' . $extension;
+                            $destination = $uploadDir . $filename;
+
+                            if (!move_uploaded_file($tmpPath, $destination)) {
+                                $error = 'Unable to upload file. Please try again.';
+                            } else {
+                                $mediaUrl = 'uploads/blogs/' . $filename;
+                            }
+                        }
                     }
                 }
             }
