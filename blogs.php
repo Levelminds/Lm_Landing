@@ -1,13 +1,21 @@
 <?php
+// Force PHP to log all errors to a visible log file
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
-try {
-    require_once __FILE__;
-} catch (Throwable $e) {
-    echo "<pre style='color:red;'>PHP ERROR: " . $e->getMessage() . " in " . $e->getFile() . " line " . $e->getLine() . "</pre>";
-    exit;
-}
+
+// Create your own debug log file
+$logFile = __DIR__ . '/blogs_debug.log';
+ini_set('log_errors', 1);
+ini_set('error_log', $logFile);
+
+// Simple test log to confirm it's working
+error_log("blogs.php script started at " . date('Y-m-d H:i:s'));
+
+// Stop output buffering from hiding errors
+if (ob_get_level()) ob_end_clean();
+
+echo "<pre style='color:gray;'>Debugging active... check blogs_debug.log for details.</pre>";
 
 $host = 'localhost';
 $dbname = 'u420143207_LM_landing';
