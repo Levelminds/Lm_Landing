@@ -16,40 +16,20 @@ $substituteFlag = defined('ENT_SUBSTITUTE') ? ENT_SUBSTITUTE : 0;
 $message = null;
 $error = null;
 $hasCategoryColumn = null;
-$hasStatusColumn = null;
 
-$titleValue = '';
-$authorValue = '';
-$summaryValue = '';
-$contentValue = '';
-$mediaTypeValue = 'photo';
-$mediaUrlValue = '';
-$categoryValue = 'general';
-$statusValue = 'published';
-$viewsValue = 0;
-$likesValue = 0;
-$responsesValue = 0;
-
-function blogColumnExists(PDO $pdo, $column)
+function blogCategoryColumnExists(PDO $pdo)
 {
     try {
-        $stmt = $pdo->prepare("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'blog_posts' AND COLUMN_NAME = :column");
-        $stmt->execute(['column' => $column]);
+        $stmt = $pdo->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'blog_posts' AND COLUMN_NAME = 'category'");
         return (bool) $stmt->fetchColumn();
     } catch (PDOException $e) {
         try {
-            $check = $pdo->prepare('SHOW COLUMNS FROM blog_posts LIKE :column');
-            $check->execute(['column' => $column]);
-            return (bool) $check->fetch(PDO::FETCH_ASSOC);
+            $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
+            return $check && $check->fetch();
         } catch (PDOException $inner) {
             return false;
         }
     }
-}
-
-function blogCategoryColumnExists(PDO $pdo)
-{
-    return blogColumnExists($pdo, 'category');
 }
 
 function ensureBlogCategoryColumn(PDO $pdo)
@@ -65,18 +45,19 @@ function ensureBlogCategoryColumn(PDO $pdo)
     }
 
     return blogCategoryColumnExists($pdo);
-}
-
-function adminEscape($value)
+function ensureBlogCategoryColumn(PDO $pdo)
 {
-    global $substituteFlag;
-    return htmlspecialchars((string) $value, ENT_QUOTES | $substituteFlag, 'UTF-8');
-}
+    try {
+        $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
+        if ($check && $check->fetch()) {
+            return true;
+        }
 
-function adminDecode($value)
-{
-    global $html5Flag;
-    return htmlspecialchars_decode((string) $value, ENT_QUOTES | $html5Flag);
+        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
+        return true;
+    } catch (PDOException $e) {
+        return false;
+    }
 }
 
 try {
@@ -84,11 +65,9 @@ try {
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     ]);
     $hasCategoryColumn = ensureBlogCategoryColumn($pdoSchema);
-    $hasStatusColumn = blogColumnExists($pdoSchema, 'status');
     $pdoSchema = null;
 } catch (PDOException $e) {
     $hasCategoryColumn = false;
-    $hasStatusColumn = false;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -110,32 +89,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $mediaTypeValue = $mediaType;
 
     $mediaUrl = trim($_POST['media_url'] ?? '');
-    $mediaUrlValue = $mediaUrl;
-
     $category = $_POST['category'] ?? 'general';
-    $allowedCategories = ['teachers', 'schools', 'general'];
-    if (!in_array($category, $allowedCategories, true)) {
-        $category = 'general';
-    }
-    $categoryValue = $category;
-
-    $status = 'published';
-    if ($hasStatusColumn) {
-        $status = strtolower(trim($_POST['status'] ?? 'published'));
-        $allowedStatuses = ['published', 'draft'];
-        if (!in_array($status, $allowedStatuses, true)) {
-            $status = 'published';
-        }
-    }
-    $statusValue = $status;
-
     $views = max(0, (int)($_POST['views'] ?? 0));
     $likes = max(0, (int)($_POST['likes'] ?? 0));
     $responses = max(0, (int)($_POST['responses'] ?? 0));
 
-    $viewsValue = $views;
-    $likesValue = $likes;
-    $responsesValue = $responses;
+    $allowedCategories = ['teachers', 'schools', 'general'];
+    if (!in_array($category, $allowedCategories, true)) {
+        $category = 'general';
+    }
 
     if ($title === '' || $summary === '' || $content === '') {
         $error = 'Please fill in the required fields (title, summary, and content).';
@@ -181,92 +143,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
 
                 $hasCategoryColumn = ensureBlogCategoryColumn($pdo);
-                $hasStatusColumn = $hasStatusColumn ?? blogColumnExists($pdo, 'status');
-
-                $columns = ['title', 'author', 'summary', 'content', 'media_type', 'media_url', 'views', 'likes', 'responses'];
-                $placeholders = [':title', ':author', ':summary', ':content', ':media_type', ':media_url', ':views', ':likes', ':responses'];
+                $columns = 'title, author, summary, content, media_type, media_url, views, likes, responses';
+                $placeholders = ':title, :author, :summary, :content, :media_type, :media_url, :views, :likes, :responses';
                 $params = [
+                $stmt = $pdo->prepare('INSERT INTO blog_posts (title, author, summary, content, media_type, media_url, category, views, likes, responses) VALUES (:title, :author, :summary, :content, :media_type, :media_url, :category, :views, :likes, :responses)');
+                $stmt->execute([
                     'title' => $title,
                     'author' => $author,
                     'summary' => $summary,
                     'content' => $content,
                     'media_type' => $mediaType,
                     'media_url' => $mediaUrl,
+                    'category' => $category,
                     'views' => $views,
                     'likes' => $likes,
                     'responses' => $responses,
                 ];
+                ]);
 
                 if ($hasCategoryColumn) {
-                    $columns[] = 'category';
-                    $placeholders[] = ':category';
+                    $columns = 'title, author, summary, content, media_type, media_url, category, views, likes, responses';
+                    $placeholders = ':title, :author, :summary, :content, :media_type, :media_url, :category, :views, :likes, :responses';
                     $params['category'] = $category;
                 }
 
-                if ($hasStatusColumn) {
-                    $columns[] = 'status';
-                    $placeholders[] = ':status';
-                    $params['status'] = $status;
-                }
-
-                $columnSql = implode(', ', $columns);
-                $placeholderSql = implode(', ', $placeholders);
-
                 try {
-                    $stmt = $pdo->prepare("INSERT INTO blog_posts ($columnSql) VALUES ($placeholderSql)");
+                    $stmt = $pdo->prepare("INSERT INTO blog_posts ($columns) VALUES ($placeholders)");
                     $stmt->execute($params);
                 } catch (PDOException $insertException) {
-                    $retry = false;
-
-                    if ($hasCategoryColumn && !blogCategoryColumnExists($pdo)) {
+                    if ($hasCategoryColumn) {
                         $hasCategoryColumn = false;
                         unset($params['category']);
-                        $retry = true;
-                    }
-
-                    if ($hasStatusColumn && !blogColumnExists($pdo, 'status')) {
-                        $hasStatusColumn = false;
-                        unset($params['status']);
-                        $retry = true;
-                    }
-
-                    if ($retry) {
-                        $columns = ['title', 'author', 'summary', 'content', 'media_type', 'media_url', 'views', 'likes', 'responses'];
-                        $placeholders = [':title', ':author', ':summary', ':content', ':media_type', ':media_url', ':views', ':likes', ':responses'];
-
-                        if ($hasCategoryColumn) {
-                            $columns[] = 'category';
-                            $placeholders[] = ':category';
-                        }
-
-                        if ($hasStatusColumn) {
-                            $columns[] = 'status';
-                            $placeholders[] = ':status';
-                        }
-
-                        $columnSql = implode(', ', $columns);
-                        $placeholderSql = implode(', ', $placeholders);
-
-                        $stmt = $pdo->prepare("INSERT INTO blog_posts ($columnSql) VALUES ($placeholderSql)");
+                        $columns = 'title, author, summary, content, media_type, media_url, views, likes, responses';
+                        $placeholders = ':title, :author, :summary, :content, :media_type, :media_url, :views, :likes, :responses';
+                        $stmt = $pdo->prepare("INSERT INTO blog_posts ($columns) VALUES ($placeholders)");
                         $stmt->execute($params);
                     } else {
                         throw $insertException;
                     }
                 }
-
+                $stmt = $pdo->prepare("INSERT INTO blog_posts ($columns) VALUES ($placeholders)");
+                $stmt->execute($params);
                 $message = 'Blog post saved successfully.';
-                $titleValue = '';
-                $authorValue = '';
-                $summaryValue = '';
-                $contentValue = '';
-                $mediaTypeValue = 'photo';
-                $mediaUrlValue = '';
-                $categoryValue = 'general';
-                $statusValue = 'published';
-                $viewsValue = 0;
-                $likesValue = 0;
-                $responsesValue = 0;
-            } catch (Exception $e) {
+            } catch (Throwable $e) {
                 error_log('[post-blog.php] ' . $e->getMessage());
                 $error = 'Database error: ' . adminEscape($e->getMessage());
             }
@@ -293,6 +212,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     .admin-nav nav a.active, .admin-nav nav a:hover { color: #3C8DFF; }
     .admin-card { background: #ffffff; border-radius: 18px; box-shadow: 0 20px 60px rgba(15, 46, 91, 0.08); padding: 32px; }
     textarea.js-rich-editor { min-height: 180px; }
+    .rich-editor { border: 1px solid #dbe4f3; border-radius: 14px; overflow: hidden; background: #ffffff; box-shadow: inset 0 1px 2px rgba(15, 46, 91, 0.06); }
+    .rich-toolbar { display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.45rem 0.55rem; background: #f0f5ff; border-bottom: 1px solid #dbe4f3; }
+    .rich-toolbar button { border: none; background: transparent; color: #405275; border-radius: 8px; width: 2.2rem; height: 2.2rem; display: inline-flex; align-items: center; justify-content: center; font-size: 1rem; transition: background 0.2s ease, color 0.2s ease; }
+    .rich-toolbar button:focus { outline: none; box-shadow: 0 0 0 2px rgba(60, 141, 255, 0.25); }
+    .rich-toolbar button:hover, .rich-toolbar button.is-active { background: rgba(60, 141, 255, 0.12); color: #2a62d5; }
+    .rich-toolbar select { border-radius: 8px; border: 1px solid #c7d3e8; padding: 0.25rem 0.5rem; background: #ffffff; color: #2f3f5d; font-size: 0.85rem; }
+    .rich-content { min-height: 160px; padding: 0.9rem; font-size: 0.98rem; line-height: 1.6; color: #23324d; }
+    .rich-content:focus { outline: none; box-shadow: inset 0 0 0 2px rgba(60, 141, 255, 0.18); }
+    .rich-content[data-empty="true"]::before { content: attr(data-placeholder); color: #8ea2c2; pointer-events: none; }
+    .rich-content a { color: #2a62d5; text-decoration: underline; }
+    .rich-content ul, .rich-content ol { padding-left: 1.25rem; margin-bottom: 0.75rem; }
+    textarea.js-rich-editor.js-rich-source-hidden { display: none !important; }
   </style>
 </head>
 <body>
@@ -330,26 +261,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           <label class="form-label fw-semibold">Audience Category *</label>
           <?php if ($hasCategoryColumn): ?>
           <select name="category" class="form-select" required>
-            <option value="teachers" <?php echo $categoryValue === 'teachers' ? 'selected' : ''; ?>>For Teachers</option>
-            <option value="schools" <?php echo $categoryValue === 'schools' ? 'selected' : ''; ?>>For Schools</option>
-            <option value="general" <?php echo $categoryValue === 'general' ? 'selected' : ''; ?>>General Insights</option>
+            <option value="teachers">For Teachers</option>
+            <option value="schools">For Schools</option>
+            <option value="general" selected>General Insights</option>
           </select>
           <?php else: ?>
           <input type="hidden" name="category" value="general">
           <div class="form-text text-muted">Categories will default to General until the database is updated.</div>
           <?php endif; ?>
         </div>
-        <?php if ($hasStatusColumn): ?>
-        <div class="col-md-4">
-          <label class="form-label fw-semibold">Status *</label>
-          <select name="status" class="form-select" required>
-            <option value="published" <?php echo $statusValue === 'published' ? 'selected' : ''; ?>>Published</option>
-            <option value="draft" <?php echo $statusValue === 'draft' ? 'selected' : ''; ?>>Draft</option>
-          </select>
-        </div>
-        <?php else: ?>
-        <input type="hidden" name="status" value="published">
-        <?php endif; ?>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Blog Type *</label>
           <select name="media_type" class="form-select" required>
@@ -381,11 +301,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Short Summary *</label>
-          <textarea name="summary" class="form-control js-rich-editor" rows="2" placeholder="Write a short summary that appears on the blog card." required><?php echo adminDecode($summaryValue); ?></textarea>
+          <textarea name="summary" class="form-control js-rich-editor" rows="2" placeholder="Write a short summary that appears on the blog card." required></textarea>
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Main Content *</label>
-          <textarea name="content" class="form-control js-rich-editor" rows="8" placeholder="Share the full story, add headings, and include helpful links." required><?php echo adminDecode($contentValue); ?></textarea>
+          <textarea name="content" class="form-control js-rich-editor" rows="8" placeholder="Share the full story, add headings, and include helpful links." required></textarea>
+          <textarea name="summary" class="form-control js-rich-editor" rows="2" required></textarea>
+        </div>
+        <div class="col-12">
+          <label class="form-label fw-semibold">Main Content *</label>
+          <textarea name="content" class="form-control js-rich-editor" rows="8" required></textarea>
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Initial Views</label>
@@ -473,6 +398,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <script src="assets/js/admin-media-tools.js"></script>
   <script>
     document.addEventListener('DOMContentLoaded', function () {
+  <script src="https://cdn.tiny.cloud/1/no-api-key/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
       if (typeof tinymce === 'undefined') {
         return;
       }
@@ -501,6 +429,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
       document.querySelectorAll('form').forEach(function (form) {
         form.addEventListener('submit', function () {
+        menubar: false,
+        branding: false,
+        plugins: 'lists link table image media code fullscreen autoresize',
+        toolbar: 'undo redo | blocks | bold italic underline | alignleft aligncenter alignright alignjustify | bullist numlist | link table | removeformat | code fullscreen',
+        min_height: 220,
+        autoresize_bottom_margin: 16,
+        convert_urls: false,
+        setup: (editor) => {
+          editor.on('change keyup setcontent', () => {
+            editor.save();
+          });
+        }
+      });
+
+      document.querySelectorAll('form').forEach((form) => {
+        form.addEventListener('submit', () => {
           if (typeof tinymce !== 'undefined') {
             tinymce.triggerSave();
           }

@@ -81,6 +81,11 @@
       modal.hide();
     });
   });
+  if (!modalEl || typeof bootstrap === 'undefined') {
+    return;
+  }
+
+  const modal = new bootstrap.Modal(modalEl, { backdrop: 'static' });
   const previewImage = modalEl.querySelector('[data-cropper-target]');
   const ratioSelect = modalEl.querySelector('[data-aspect-select]');
   const widthInput = modalEl.querySelector('[data-output-width]');
@@ -151,6 +156,8 @@
     }
   }
 
+  const previewUrls = new Set();
+
   function clearPreviewUrls() {
     previewUrls.forEach((value) => URL.revokeObjectURL(value));
     previewUrls.clear();
@@ -211,6 +218,7 @@
     }
 
     cropper = new window.Cropper(previewImage, {
+    cropper = new Cropper(previewImage, {
       aspectRatio: aspectRatio,
       viewMode: 2,
       autoCropArea: 1,
@@ -251,6 +259,7 @@
   function updatePreviewContainer(file, input) {
     const field = input.closest('[data-media-field]');
     const previewWrapper = field ? field.querySelector('[data-media-preview]') : null;
+    const previewWrapper = input.closest('[data-media-field]')?.querySelector('[data-media-preview]');
     if (!previewWrapper) {
       return;
     }
@@ -456,6 +465,19 @@
   });
 
   modalEl.addEventListener('hidden.bs.modal', handleModalHidden);
+  modalEl.addEventListener('hidden.bs.modal', () => {
+    if (cropper) {
+      cropper.destroy();
+      cropper = null;
+    }
+    previewImage.src = '';
+    currentFile = null;
+    currentInput = null;
+    currentType = 'image';
+    naturalWidth = 0;
+    naturalHeight = 0;
+    clearPreviewUrls();
+  });
 
   confirmBtn.addEventListener('click', (event) => {
     event.preventDefault();
@@ -544,6 +566,7 @@
       currentInput = fileInput;
       currentFile = file;
       const type = ((mediaTypeSelect && mediaTypeSelect.value === 'video') || file.type.startsWith('video')) ? 'video' : 'image';
+      const type = (mediaTypeSelect?.value === 'video' || file.type.startsWith('video')) ? 'video' : 'image';
       currentType = type;
       resetModalState();
       ratioSelect.value = type === 'video' ? '16:9' : 'original';
@@ -581,6 +604,8 @@
             errorBox.textContent = 'Unable to read the selected image file.';
             errorBox.classList.remove('d-none');
           };
+            temp.src = reader.result;
+          };
           reader.readAsDataURL(file);
         }
       } catch (error) {
@@ -599,6 +624,7 @@
 
     if (adjustButton) {
       adjustButton.addEventListener('click', async () => {
+      adjustButton.addEventListener('click', () => {
         if (!fileInput.files.length) {
           fileInput.click();
           return;
@@ -613,6 +639,9 @@
         currentInput = fileInput;
         const file = fileInput.files[0];
         const type = ((mediaTypeSelect && mediaTypeSelect.value === 'video') || file.type.startsWith('video')) ? 'video' : 'image';
+        currentInput = fileInput;
+        const file = fileInput.files[0];
+        const type = (mediaTypeSelect?.value === 'video' || file.type.startsWith('video')) ? 'video' : 'image';
         currentFile = file;
         currentType = type;
         resetModalState();
@@ -632,6 +661,20 @@
             errorBox.textContent = error.message || 'Unable to prepare video for editing.';
             errorBox.classList.remove('d-none');
           }
+          prepareVideoPreview(file)
+            .then((preview) => {
+              previewImage.src = preview.url;
+              naturalWidth = preview.dimensions.width;
+              naturalHeight = preview.dimensions.height;
+              originalSizeLabel.textContent = `${naturalWidth} × ${naturalHeight}`;
+              currentType = 'video';
+              bindCropper(ratioMap[ratioSelect.value]);
+              modal.show();
+            })
+            .catch((error) => {
+              errorBox.textContent = error.message || 'Unable to prepare video for editing.';
+              errorBox.classList.remove('d-none');
+            });
         } else {
           const reader = new FileReader();
           reader.onload = function () {
@@ -654,6 +697,8 @@
           reader.onerror = () => {
             errorBox.textContent = 'Unable to read the selected image file.';
             errorBox.classList.remove('d-none');
+          };
+            temp.src = reader.result;
           };
           reader.readAsDataURL(file);
         }
