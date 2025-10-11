@@ -65,6 +65,7 @@ function encodeBlogDataAttr($value)
     }
 
     return base64_encode((string) $value);
+}   
 function ensureBlogCategoryColumn(PDO $pdo)
 {
     try {
