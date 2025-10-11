@@ -1,1 +1,55 @@
-﻿[]
+
+[
+  {
+    "id": 1,
+    "title": "Coaching Rituals That Help Teachers Thrive",
+    "author": "LevelMinds Team",
+    "summary": "How weekly reflection huddles can turn classroom insights into actionable growth plans for educators.",
+    "content": "<p>Build a consistent rhythm of coaching by pairing classroom observations with collaborative debriefs. Focus on one growth goal each week and celebrate micro wins in your next stand-up.</p><p>Use quick voice notes or short Loom videos to share playbacks so teachers can revisit feedback on their own time.</p>",
+    "media_type": "photo",
+    "media_url": "https://images.unsplash.com/photo-1588072432836-e10032774350?auto=format&fit=crop&w=800&q=80",
+    "category": "teachers",
+    "created_at": "2024-03-04 09:00:00",
+    "views": 284,
+    "likes": 42
+  },
+  {
+    "id": 2,
+    "title": "Hiring Playbooks for a New Academic Year",
+    "author": "Priya Sharma",
+    "summary": "A three-sprint approach school leaders can use to fill critical roles before orientation day.",
+    "content": "<p>Start with a listening sprint to gather inputs from department heads, then launch a talent sourcing sprint focusing on candidate experience. Close with a culture sprint that onboards new hires with peer mentors.</p>",
+    "media_type": "photo",
+    "media_url": "https://images.unsplash.com/photo-1553877522-43269d4ea984?auto=format&fit=crop&w=800&q=80",
+    "category": "schools",
+    "created_at": "2024-02-19 11:30:00",
+    "views": 512,
+    "likes": 67
+  },
+  {
+    "id": 3,
+    "title": "Designing Hybrid PD That Sticks",
+    "author": "LevelMinds Lab",
+    "summary": "Blend asynchronous micro-learning with live cohort sessions to make professional development sustainable.",
+    "content": "<p>Mix five-minute micro-lessons with a monthly live case clinic. Give educators choice boards so they can personalize their learning path and track reflections in a shared journal.</p>",
+    "media_type": "photo",
+    "media_url": "https://images.unsplash.com/photo-1523580846011-d3a5bc25702b?auto=format&fit=crop&w=800&q=80",
+    "category": "general",
+    "created_at": "2024-01-22 15:45:00",
+    "views": 198,
+    "likes": 28
+  },
+  {
+    "id": 4,
+    "title": "Inside a Teacher Talent Community Launch",
+    "author": "Arjun Patel",
+    "summary": "See how one network school activated alumni and substitute teachers with a single onboarding journey.",
+    "content": "<p>The operations team mapped every touchpoint from first outreach to first day in the classroom. They automated reminders with WhatsApp templates and used pulse surveys to keep talent warm.</p>",
+    "media_type": "photo",
+    "media_url": "https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=800&q=80",
+    "category": "schools",
+    "created_at": "2023-12-08 10:15:00",
+    "views": 341,
+    "likes": 51
+  }
+]
