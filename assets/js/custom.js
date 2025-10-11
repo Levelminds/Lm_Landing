@@ -544,22 +544,203 @@ document.addEventListener('DOMContentLoaded', countdownInit);
 
 
 
-// ========== LM Blogs: Subscription + Like Button Logic (cards + modal, DB-backed with graceful fallback) ==========
+// ========== LM Blogs: Subscriber-gated Likes & Sharing ==========
 (function() {
-  const SUB_KEY = 'lmSubscribed';
   const EMAIL_KEY = 'lmEmail';
-  const API_URL = 'api/like.php'; // adjust if your API lives elsewhere
+  const TOKEN_KEY = 'lmVisitorToken';
+  const LIKE_STATE_PREFIX = 'lm_like_state_';
+  const API_URL = 'api/like.php';
+  const SUBSCRIBER_STATUS_KEY = 'lmSubscriberStatus';
+  const SUBSCRIBER_STATUS_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+  const SUBSCRIBER_API = 'api/subscriber-status.php';
+  const SHARE_TARGETS = [
+    { network: 'copy', label: 'Copy link', icon: 'bi-clipboard' },
+    { network: 'whatsapp', label: 'WhatsApp', icon: 'bi-whatsapp' },
+    { network: 'facebook', label: 'Facebook', icon: 'bi-facebook' },
+    { network: 'linkedin', label: 'LinkedIn', icon: 'bi-linkedin' },
+    { network: 'twitter', label: 'X (Twitter)', icon: 'bi-twitter' }
+  ];
 
-  function isSubscribed() {
-    try { return JSON.parse(localStorage.getItem(SUB_KEY) || 'false') === true; } catch { return false; }
-  }
-  function getEmail() { return (localStorage.getItem(EMAIL_KEY) || '').trim(); }
-  function setSubscribed(email) {
-    if (email) localStorage.setItem(EMAIL_KEY, email.trim());
-    localStorage.setItem(SUB_KEY, 'true');
+  let activeShareMenu = null;
+
+  function decodeBase64(value) {
+    if (!value) {
+      return '';
+    }
+    try {
+      const binary = atob(value);
+      if (window.TextDecoder) {
+        const decoder = new TextDecoder('utf-8', { fatal: false });
+        const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+        return decoder.decode(bytes);
+      }
+      return decodeURIComponent(Array.prototype.map.call(binary, function (char) {
+        return '%' + ('00' + char.charCodeAt(0).toString(16)).slice(-2);
+      }).join(''));
+    } catch (error) {
+      return '';
+    }
   }
 
-  // Toast
+  function normaliseEmail(value) {
+    return (value || '').trim().toLowerCase();
+  }
+
+  function getEmail() {
+    return (localStorage.getItem(EMAIL_KEY) || '').trim();
+  }
+
+  function setEmail(email) {
+    if (email) {
+      localStorage.setItem(EMAIL_KEY, email.trim());
+    }
+  }
+
+  function clearEmail() {
+    localStorage.removeItem(EMAIL_KEY);
+    localStorage.removeItem(SUBSCRIBER_STATUS_KEY);
+  }
+
+  function readSubscriberCache() {
+    try {
+      const raw = localStorage.getItem(SUBSCRIBER_STATUS_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function writeSubscriberCache(email, active) {
+    if (!email) {
+      localStorage.removeItem(SUBSCRIBER_STATUS_KEY);
+      return;
+    }
+    const payload = {
+      email: normaliseEmail(email),
+      active: !!active,
+      timestamp: Date.now()
+    };
+    localStorage.setItem(SUBSCRIBER_STATUS_KEY, JSON.stringify(payload));
+  }
+
+  async function verifySubscriber(email) {
+    const normalized = normaliseEmail(email);
+    const cached = readSubscriberCache();
+    if (cached && cached.email === normalized && (Date.now() - cached.timestamp) < SUBSCRIBER_STATUS_TTL_MS) {
+      return !!cached.active;
+    }
+
+    const res = await fetch(SUBSCRIBER_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || typeof data.active !== 'boolean') {
+      throw new Error((data && data.message) || 'Unable to verify subscription right now.');
+    }
+    writeSubscriberCache(email, data.active);
+    return data.active;
+  }
+
+  function scrollToNewsletter() {
+    const section = document.getElementById('newsletter');
+    if (section && typeof section.scrollIntoView === 'function') {
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
+  function emailLooksValid(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  }
+
+  async function ensureSubscriberEmail() {
+    let email = getEmail();
+    if (email) {
+      try {
+        const active = await verifySubscriber(email);
+        if (active) {
+          return email;
+        }
+        clearEmail();
+        showToast('We could not verify your subscription. Please subscribe again.');
+        scrollToNewsletter();
+      } catch (err) {
+        showToast(err && err.message ? err.message : 'Unable to verify your subscription right now.');
+        return null;
+      }
+    }
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const input = window.prompt('Enter the email you used to subscribe:');
+      if (!input) {
+        showToast('Subscription is required to continue.');
+        scrollToNewsletter();
+        return null;
+      }
+      const candidate = input.trim();
+      if (!emailLooksValid(candidate)) {
+        showToast('Please enter a valid email address.');
+        continue;
+      }
+      try {
+        const active = await verifySubscriber(candidate);
+        if (active) {
+          setEmail(candidate);
+          return candidate;
+        }
+        showToast('We could not find an active subscription for that email.');
+        scrollToNewsletter();
+      } catch (err) {
+        showToast(err && err.message ? err.message : 'Unable to verify your subscription right now.');
+        return null;
+      }
+    }
+    return null;
+  }
+
+  function generateToken() {
+    if (window.crypto && crypto.getRandomValues) {
+      const array = new Uint8Array(16);
+      crypto.getRandomValues(array);
+      return Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    return 'lm_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+
+  function getVisitorToken() {
+    let token = localStorage.getItem(TOKEN_KEY);
+    if (!token) {
+      token = generateToken();
+      localStorage.setItem(TOKEN_KEY, token);
+    }
+    return token;
+  }
+
+  function isLocallyLiked(postId) {
+    const newKey = LIKE_STATE_PREFIX + postId;
+    if (localStorage.getItem(newKey) === '1') {
+      return true;
+    }
+    const legacyKey = 'lm_like_' + postId;
+    if (localStorage.getItem(legacyKey) === '1') {
+      localStorage.setItem(newKey, '1');
+      localStorage.removeItem(legacyKey);
+      return true;
+    }
+    return false;
+  }
+
+  function setLocalLike(postId, liked) {
+    const key = LIKE_STATE_PREFIX + postId;
+    if (liked) {
+      localStorage.setItem(key, '1');
+    } else {
+      localStorage.removeItem(key);
+    }
+    localStorage.removeItem('lm_like_' + postId);
+  }
+
   function showToast(message) {
     let container = document.getElementById('lm-toast-container');
     if (!container) {
@@ -585,110 +766,272 @@ document.addEventListener('DOMContentLoaded', countdownInit);
     }, 2200);
   }
 
-  // Mark subscribed when newsletter form is submitted (tries to read email)
   document.addEventListener('submit', function(e) {
     const form = e.target;
     if (form.closest && form.closest('#newsletter')) {
       const emailInput = form.querySelector('input[type="email"], input[name="email"]');
       if (emailInput && emailInput.value) {
-        setSubscribed(emailInput.value);
-      } else {
-        localStorage.setItem(SUB_KEY, 'true');
+        setEmail(emailInput.value);
+        writeSubscriberCache(emailInput.value, false);
       }
-      showToast('🎉 Subscribed! You can now like posts.');
+      showToast('🎉 Thanks for subscribing!');
     }
   }, true);
 
-  // Hydrate icon state for all like buttons
+  function renderLikedState(btn, liked) {
+    const icon = btn.querySelector('.bi');
+    if (liked) {
+      btn.classList.add('liked');
+      if (icon) {
+        icon.classList.add('bi-heart-fill');
+        icon.classList.remove('bi-heart');
+      }
+    } else {
+      btn.classList.remove('liked');
+      if (icon) {
+        icon.classList.add('bi-heart');
+        icon.classList.remove('bi-heart-fill');
+      }
+    }
+  }
+
   function hydrateLikes() {
     document.querySelectorAll('[data-like-btn]').forEach(btn => {
-      const icon = btn.querySelector('.bi');
       const postId = btn.getAttribute('data-post-id');
-      const liked = localStorage.getItem('lm_like_' + postId) === '1';
-      if (liked) {
-        btn.classList.add('liked');
-        icon && icon.classList.remove('bi-heart');
-        icon && icon.classList.add('bi-heart-fill');
-      } else {
-        btn.classList.remove('liked');
-        icon && icon.classList.add('bi-heart');
-        icon && icon.classList.remove('bi-heart-fill');
-      }
+      const liked = isLocallyLiked(postId);
+      renderLikedState(btn, liked);
     });
   }
 
   async function toggleLikeServer(postId, email) {
+    const payload = {
+      post_id: postId,
+      visitor_token: getVisitorToken(),
+      email: email
+    };
     const res = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ post_id: postId, email: email, action: 'toggle' })
+      body: JSON.stringify(payload)
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
+    if (!res.ok || !data || typeof data.likes !== 'number') {
       const msg = data && data.message ? data.message : 'Unable to like right now.';
       throw new Error(msg);
     }
-    return data; // { liked: true/false, likes: number }
+    return data;
+  }
+
+  function closeShareMenu() {
+    if (activeShareMenu && activeShareMenu.menu && activeShareMenu.menu.parentNode) {
+      activeShareMenu.menu.parentNode.removeChild(activeShareMenu.menu);
+    }
+    activeShareMenu = null;
+  }
+
+  function buildShareMenu() {
+    const menu = document.createElement('div');
+    menu.className = 'lm-share-menu shadow';
+    SHARE_TARGETS.forEach(target => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'lm-share-menu__item';
+      button.setAttribute('data-share-network', target.network);
+      button.innerHTML = `<i class="bi ${target.icon} me-2"></i>${target.label}`;
+      menu.appendChild(button);
+    });
+    return menu;
+  }
+
+  function openShareMenu(btn, data) {
+    closeShareMenu();
+    const menu = buildShareMenu();
+    document.body.appendChild(menu);
+    const rect = btn.getBoundingClientRect();
+    const top = window.scrollY + rect.bottom + 8;
+    let left = window.scrollX + rect.left;
+    const maxLeft = window.scrollX + window.innerWidth - menu.offsetWidth - 16;
+    if (!Number.isFinite(left)) {
+      left = window.scrollX + 16;
+    }
+    if (left > maxLeft) {
+      left = Math.max(window.scrollX + 16, maxLeft);
+    }
+    menu.style.position = 'absolute';
+    menu.style.top = `${Math.round(top)}px`;
+    menu.style.left = `${Math.round(left)}px`;
+    activeShareMenu = { menu, data };
+  }
+
+  function shareUrlFor(network, data) {
+    const url = data.url;
+    const title = data.title;
+    const summary = data.summary || title;
+    switch (network) {
+      case 'whatsapp':
+        return `https://wa.me/?text=${encodeURIComponent(`${title}\n${url}`)}`;
+      case 'facebook':
+        return `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`;
+      case 'linkedin':
+        return `https://www.linkedin.com/shareArticle?mini=true&url=${encodeURIComponent(url)}&title=${encodeURIComponent(title)}&summary=${encodeURIComponent(summary)}`;
+      case 'twitter':
+        return `https://twitter.com/intent/tweet?url=${encodeURIComponent(url)}&text=${encodeURIComponent(title)}`;
+      default:
+        return '';
+    }
+  }
+
+  async function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'absolute';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    let success = false;
+    try {
+      success = document.execCommand('copy');
+    } catch (error) {
+      success = false;
+    }
+    textarea.remove();
+    return success;
   }
 
   document.addEventListener('click', async function(e) {
     const btn = e.target.closest && e.target.closest('[data-like-btn]');
-    if (!btn) return;
+    if (!btn) {
+      return;
+    }
 
     const postId = btn.getAttribute('data-post-id');
-    const countEl = btn.querySelector('[data-like-count]');
-    const icon = btn.querySelector('.bi');
-    const email = getEmail();
+    if (!postId) {
+      return;
+    }
 
-    if (!isSubscribed() || !email) {
-      showToast('Please subscribe to LM Blogs to use the Like feature.');
-      // Optionally, jump to the newsletter section:
-      const section = document.getElementById('newsletter');
-      if (section) section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const countEl = btn.querySelector('[data-like-count]');
+    const email = await ensureSubscriberEmail();
+    if (!email) {
+      renderLikedState(btn, isLocallyLiked(postId));
       return;
     }
 
     try {
-      // Server-backed like
       const result = await toggleLikeServer(postId, email);
       const liked = !!result.liked;
-      const likes = typeof result.likes === 'number' ? result.likes : parseInt(countEl.textContent || '0', 10);
+      const likes = Number(result.likes);
 
-      countEl.textContent = String(likes);
-      if (liked) {
-        btn.classList.add('liked');
-        icon && icon.classList.remove('bi-heart');
-        icon && icon.classList.add('bi-heart-fill');
-        localStorage.setItem('lm_like_' + postId, '1');
-      } else {
-        btn.classList.remove('liked');
-        icon && icon.classList.add('bi-heart');
-        icon && icon.classList.remove('bi-heart-fill');
-        localStorage.removeItem('lm_like_' + postId);
+      if (Number.isFinite(likes) && countEl) {
+        countEl.textContent = likes.toLocaleString();
       }
+      renderLikedState(btn, liked);
+      setLocalLike(postId, liked);
+      writeSubscriberCache(email, true);
+
+      document.dispatchEvent(new CustomEvent('lm:likes-updated', {
+        detail: { postId: postId, likes: likes, liked: liked }
+      }));
     } catch (err) {
-      // Fallback to local-only
-      let count = parseInt(countEl.textContent || '0', 10);
-      const storageKey = 'lm_like_' + postId;
-      const currentlyLiked = localStorage.getItem(storageKey) === '1';
-
-      if (currentlyLiked) {
-        localStorage.removeItem(storageKey);
-        count = Math.max(0, count - 1);
-        btn.classList.remove('liked');
-        icon && icon.classList.add('bi-heart');
-        icon && icon.classList.remove('bi-heart-fill');
-      } else {
-        localStorage.setItem(storageKey, '1');
-        count = count + 1;
-        btn.classList.add('liked');
-        icon && icon.classList.remove('bi-heart');
-        icon && icon.classList.add('bi-heart-fill');
-      }
-      countEl.textContent = String(count);
-      showToast(err && err.message ? err.message : 'Saved locally (offline).');
+      showToast(err && err.message ? err.message : 'Unable to like right now.');
+      renderLikedState(btn, isLocallyLiked(postId));
     }
   });
+
+  document.addEventListener('click', async function(e) {
+    const shareBtn = e.target.closest && e.target.closest('[data-share-btn]');
+    if (!shareBtn) {
+      return;
+    }
+    e.preventDefault();
+
+    const email = await ensureSubscriberEmail();
+    if (!email) {
+      closeShareMenu();
+      return;
+    }
+    writeSubscriberCache(email, true);
+
+    const dataset = shareBtn.dataset || {};
+    const shareData = {
+      url: dataset.shareUrl || window.location.href,
+      title: dataset.shareTitle || document.title,
+      summary: dataset.shareSummaryB64 ? decodeBase64(dataset.shareSummaryB64) : (dataset.shareSummary || '')
+    };
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: shareData.title,
+          text: shareData.summary || shareData.title,
+          url: shareData.url
+        });
+        showToast('Thanks for sharing!');
+      } catch (err) {
+        if (!err || err.name !== 'AbortError') {
+          showToast('Unable to complete the share right now.');
+        }
+      }
+      return;
+    }
+
+    openShareMenu(shareBtn, shareData);
+  });
+
+  document.addEventListener('click', function(event) {
+    const option = event.target.closest && event.target.closest('[data-share-network]');
+    if (!option || !activeShareMenu) {
+      return;
+    }
+    event.preventDefault();
+    const network = option.getAttribute('data-share-network');
+    const data = activeShareMenu.data;
+    closeShareMenu();
+
+    if (network === 'copy') {
+      copyToClipboard(data.url).then(success => {
+        showToast(success ? 'Link copied. Share it with your network!' : 'Unable to copy link automatically.');
+      });
+      return;
+    }
+
+    const url = shareUrlFor(network, data);
+    if (url) {
+      window.open(url, '_blank', 'noopener,width=600,height=520');
+      showToast('Sharing window opened.');
+    } else {
+      showToast('Share option is not available right now.');
+    }
+  });
+
+  document.addEventListener('click', function(event) {
+    if (!activeShareMenu) {
+      return;
+    }
+    const isMenu = activeShareMenu.menu.contains(event.target);
+    const isTrigger = event.target.closest && event.target.closest('[data-share-btn]');
+    if (!isMenu && !isTrigger) {
+      closeShareMenu();
+    }
+  });
+
+  document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+      closeShareMenu();
+    }
+  });
+
+  window.LM = window.LM || {};
+  window.LM.hydrateLikes = hydrateLikes;
+  window.LM.ensureSubscriberEmail = ensureSubscriberEmail;
 
   document.addEventListener('DOMContentLoaded', hydrateLikes);
 })();
