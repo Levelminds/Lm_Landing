@@ -78,6 +78,7 @@ try {
             throw $queryException;
         }
     }
+    $postsStmt = $pdo->query('SELECT id, title, author, media_type, category, status, created_at, views, likes FROM blog_posts ORDER BY created_at DESC');
     $posts = $postsStmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     $error = 'Database error: ' . htmlspecialchars($e->getMessage());
@@ -153,6 +154,7 @@ try {
                 <td><span class="badge bg-<?php echo $post['media_type'] === 'video' ? 'info' : 'secondary'; ?>"><?php echo ucfirst($post['media_type']); ?></span></td>
                 <td><?php
                   $categoryKey = $hasCategoryColumn ? ($post['category'] ?? 'general') : 'general';
+                  $categoryKey = $post['category'] ?? 'general';
                   $label = $audienceLabels[$categoryKey] ?? ucfirst($categoryKey);
                   echo htmlspecialchars($label);
                 ?></td>
