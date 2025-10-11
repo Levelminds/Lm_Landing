@@ -544,6 +544,49 @@ document.addEventListener('DOMContentLoaded', countdownInit);
 
 
 
+// ========== LM Blogs: Likes & Sharing ==========
+(function() {
+  const API_URL = 'api/like.php';
+  const LIKE_STATE_PREFIX = 'lm_like_state_';
+  const TOKEN_KEY = 'lm_like_token';
+  const SHARE_TARGETS = [
+    { network: 'copy', label: 'Copy link', icon: 'bi-clipboard' },
+    { network: 'whatsapp', label: 'WhatsApp', icon: 'bi-whatsapp' },
+    { network: 'facebook', label: 'Facebook', icon: 'bi-facebook' },
+    { network: 'linkedin', label: 'LinkedIn', icon: 'bi-linkedin' },
+    { network: 'twitter', label: 'X (Twitter)', icon: 'bi-twitter' }
+  ];
+
+  let activeShareMenu = null;
+
+  function decodeBase64(value) {
+    if (!value) {
+      return '';
+    }
+    try {
+      const binary = atob(value);
+      if (window.TextDecoder) {
+        const decoder = new TextDecoder('utf-8', { fatal: false });
+        const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+        return decoder.decode(bytes);
+      }
+      return decodeURIComponent(Array.prototype.map.call(binary, function (char) {
+        return '%' + ('00' + char.charCodeAt(0).toString(16)).slice(-2);
+      }).join(''));
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function generateToken() {
+    if (window.crypto && crypto.getRandomValues) {
+      const array = new Uint8Array(16);
+      crypto.getRandomValues(array);
+      return Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    return 'lm_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+
 // ========== LM Blogs: Visitor-friendly Like Button Logic (cards + modal, DB-backed with graceful fallback) ==========
 (function() {
   const EMAIL_KEY = 'lmEmail';
@@ -628,6 +671,20 @@ document.addEventListener('DOMContentLoaded', countdownInit);
     }, 2200);
   }
 
+  function renderLikedState(btn, liked) {
+    const icon = btn.querySelector('.bi');
+    if (liked) {
+      btn.classList.add('liked');
+      if (icon) {
+        icon.classList.add('bi-heart-fill');
+        icon.classList.remove('bi-heart');
+      }
+    } else {
+      btn.classList.remove('liked');
+      if (icon) {
+        icon.classList.add('bi-heart');
+        icon.classList.remove('bi-heart-fill');
+      }
   // Capture newsletter email so we can associate it with likes later (optional)
   document.addEventListener('submit', function(e) {
     const form = e.target;
@@ -638,7 +695,7 @@ document.addEventListener('DOMContentLoaded', countdownInit);
       }
       showToast('🎉 Thanks for subscribing!');
     }
-  }, true);
+  }
 
   function renderLikedState(btn, liked) {
     const icon = btn.querySelector('.bi');
@@ -665,6 +722,7 @@ document.addEventListener('DOMContentLoaded', countdownInit);
     });
   }
 
+  async function toggleLikeServer(postId) {
   async function toggleLikeServer(postId, email) {
     const payload = {
       post_id: postId,
@@ -683,6 +741,92 @@ document.addEventListener('DOMContentLoaded', countdownInit);
       const msg = data && data.message ? data.message : 'Unable to like right now.';
       throw new Error(msg);
     }
+    return data;
+  }
+
+  function closeShareMenu() {
+    if (activeShareMenu && activeShareMenu.menu && activeShareMenu.menu.parentNode) {
+      activeShareMenu.menu.parentNode.removeChild(activeShareMenu.menu);
+    }
+    activeShareMenu = null;
+  }
+
+  function buildShareMenu() {
+    const menu = document.createElement('div');
+    menu.className = 'lm-share-menu shadow';
+    SHARE_TARGETS.forEach(target => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'lm-share-menu__item';
+      button.setAttribute('data-share-network', target.network);
+      button.innerHTML = `<i class="bi ${target.icon} me-2"></i>${target.label}`;
+      menu.appendChild(button);
+    });
+    return menu;
+  }
+
+  function openShareMenu(btn, data) {
+    closeShareMenu();
+    const menu = buildShareMenu();
+    document.body.appendChild(menu);
+    const rect = btn.getBoundingClientRect();
+    const top = window.scrollY + rect.bottom + 8;
+    let left = window.scrollX + rect.left;
+    const maxLeft = window.scrollX + window.innerWidth - menu.offsetWidth - 16;
+    if (!Number.isFinite(left)) {
+      left = window.scrollX + 16;
+    }
+    if (left > maxLeft) {
+      left = Math.max(window.scrollX + 16, maxLeft);
+    }
+    menu.style.position = 'absolute';
+    menu.style.top = `${Math.round(top)}px`;
+    menu.style.left = `${Math.round(left)}px`;
+    activeShareMenu = { menu, data };
+  }
+
+  function shareUrlFor(network, data) {
+    const url = data.url;
+    const title = data.title;
+    const summary = data.summary || title;
+    switch (network) {
+      case 'whatsapp':
+        return `https://wa.me/?text=${encodeURIComponent(`${title}\n${url}`)}`;
+      case 'facebook':
+        return `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`;
+      case 'linkedin':
+        return `https://www.linkedin.com/shareArticle?mini=true&url=${encodeURIComponent(url)}&title=${encodeURIComponent(title)}&summary=${encodeURIComponent(summary)}`;
+      case 'twitter':
+        return `https://twitter.com/intent/tweet?url=${encodeURIComponent(url)}&text=${encodeURIComponent(title)}`;
+      default:
+        return '';
+    }
+  }
+
+  async function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'absolute';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    let success = false;
+    try {
+      success = document.execCommand('copy');
+    } catch (error) {
+      success = false;
+    }
+    textarea.remove();
+    return success;
     return data; // { liked: bool, likes: number }
   }
 
@@ -693,6 +837,18 @@ document.addEventListener('DOMContentLoaded', countdownInit);
     }
 
     const postId = btn.getAttribute('data-post-id');
+    if (!postId) {
+      return;
+    }
+
+    const countEl = btn.querySelector('[data-like-count]');
+    try {
+      const result = await toggleLikeServer(postId);
+      const liked = !!result.liked;
+      const likes = Number(result.likes);
+
+      if (Number.isFinite(likes) && countEl) {
+        countEl.textContent = likes.toLocaleString();
     const countEl = btn.querySelector('[data-like-count]');
     const email = getEmail();
 
@@ -711,6 +867,89 @@ document.addEventListener('DOMContentLoaded', countdownInit);
         detail: { postId: postId, likes: likes, liked: liked }
       }));
     } catch (err) {
+      showToast(err && err.message ? err.message : 'Unable to like right now.');
+      renderLikedState(btn, isLocallyLiked(postId));
+    }
+  });
+
+  document.addEventListener('click', function(e) {
+    const shareBtn = e.target.closest && e.target.closest('[data-share-btn]');
+    if (!shareBtn) {
+      return;
+    }
+    e.preventDefault();
+
+    const dataset = shareBtn.dataset || {};
+    const shareData = {
+      url: dataset.shareUrl || window.location.href,
+      title: dataset.shareTitle || document.title,
+      summary: dataset.shareSummaryB64 ? decodeBase64(dataset.shareSummaryB64) : (dataset.shareSummary || '')
+    };
+
+    if (navigator.share) {
+      navigator.share({
+        title: shareData.title,
+        text: shareData.summary || shareData.title,
+        url: shareData.url
+      }).then(() => {
+        showToast('Thanks for sharing!');
+      }).catch((err) => {
+        if (!err || err.name !== 'AbortError') {
+          showToast('Unable to complete the share right now.');
+        }
+      });
+      return;
+    }
+
+    openShareMenu(shareBtn, shareData);
+  });
+
+  document.addEventListener('click', function(event) {
+    const option = event.target.closest && event.target.closest('[data-share-network]');
+    if (!option || !activeShareMenu) {
+      return;
+    }
+    event.preventDefault();
+    const network = option.getAttribute('data-share-network');
+    const data = activeShareMenu.data;
+    closeShareMenu();
+
+    if (network === 'copy') {
+      copyToClipboard(data.url).then(success => {
+        showToast(success ? 'Link copied. Share it with your network!' : 'Unable to copy link automatically.');
+      });
+      return;
+    }
+
+    const url = shareUrlFor(network, data);
+    if (url) {
+      window.open(url, '_blank', 'noopener,width=600,height=520');
+      showToast('Sharing window opened.');
+    } else {
+      showToast('Share option is not available right now.');
+    }
+  });
+
+  document.addEventListener('click', function(event) {
+    if (!activeShareMenu) {
+      return;
+    }
+    const isMenu = activeShareMenu.menu.contains(event.target);
+    const isTrigger = event.target.closest && event.target.closest('[data-share-btn]');
+    if (!isMenu && !isTrigger) {
+      closeShareMenu();
+    }
+  });
+
+  document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+      closeShareMenu();
+    }
+  });
+
+  window.LM = window.LM || {};
+  window.LM.hydrateLikes = hydrateLikes;
+  window.LM.getVisitorToken = getVisitorToken;
       let count = parseInt(countEl && countEl.textContent ? countEl.textContent.replace(/,/g, '') : '0', 10);
       const liked = !isLocallyLiked(postId);
       setLocalLike(postId, liked);
@@ -732,7 +971,6 @@ document.addEventListener('DOMContentLoaded', countdownInit);
 
   document.addEventListener('DOMContentLoaded', hydrateLikes);
 })();
-
 /* ========== LM Blogs: View Counter (modal + cards) ========== */
 (function() {
   const API_URL = 'api/view.php';     // adjust path if your API lives elsewhere

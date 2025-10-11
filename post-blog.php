@@ -14,6 +14,34 @@ $message = null;
 $error = null;
 $hasCategoryColumn = null;
 
+function blogCategoryColumnExists(PDO $pdo)
+{
+    try {
+        $stmt = $pdo->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'blog_posts' AND COLUMN_NAME = 'category'");
+        return (bool) $stmt->fetchColumn();
+    } catch (PDOException $e) {
+        try {
+            $check = $pdo->query("SHOW COLUMNS FROM blog_posts LIKE 'category'");
+            return $check && $check->fetch();
+        } catch (PDOException $inner) {
+            return false;
+        }
+    }
+}
+
+function ensureBlogCategoryColumn(PDO $pdo)
+{
+    if (blogCategoryColumnExists($pdo)) {
+        return true;
+    }
+
+    try {
+        $pdo->exec("ALTER TABLE blog_posts ADD COLUMN category ENUM('teachers','schools','general') NOT NULL DEFAULT 'general' AFTER media_url, ADD INDEX idx_category (category)");
+    } catch (PDOException $e) {
+        return false;
+    }
+
+    return blogCategoryColumnExists($pdo);
 function ensureBlogCategoryColumn(PDO $pdo)
 {
     try {
@@ -99,6 +127,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 ]);
 
+                $hasCategoryColumn = ensureBlogCategoryColumn($pdo);
+                $columns = 'title, author, summary, content, media_type, media_url, views, likes, responses';
+                $placeholders = ':title, :author, :summary, :content, :media_type, :media_url, :views, :likes, :responses';
+                $params = [
                 $stmt = $pdo->prepare('INSERT INTO blog_posts (title, author, summary, content, media_type, media_url, category, views, likes, responses) VALUES (:title, :author, :summary, :content, :media_type, :media_url, :category, :views, :likes, :responses)');
                 $stmt->execute([
                     'title' => $title,
@@ -111,6 +143,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'views' => $views,
                     'likes' => $likes,
                     'responses' => $responses,
+                ];
                 ]);
 
                 if ($hasCategoryColumn) {
@@ -119,6 +152,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $params['category'] = $category;
                 }
 
+                try {
+                    $stmt = $pdo->prepare("INSERT INTO blog_posts ($columns) VALUES ($placeholders)");
+                    $stmt->execute($params);
+                } catch (PDOException $insertException) {
+                    if ($hasCategoryColumn) {
+                        $hasCategoryColumn = false;
+                        unset($params['category']);
+                        $columns = 'title, author, summary, content, media_type, media_url, views, likes, responses';
+                        $placeholders = ':title, :author, :summary, :content, :media_type, :media_url, :views, :likes, :responses';
+                        $stmt = $pdo->prepare("INSERT INTO blog_posts ($columns) VALUES ($placeholders)");
+                        $stmt->execute($params);
+                    } else {
+                        throw $insertException;
+                    }
+                }
                 $stmt = $pdo->prepare("INSERT INTO blog_posts ($columns) VALUES ($placeholders)");
                 $stmt->execute($params);
                 $message = 'Blog post saved successfully.';
@@ -147,6 +195,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     .admin-nav nav a { margin-left: 18px; text-decoration: none; color: #51617A; font-weight: 500; }
     .admin-nav nav a.active, .admin-nav nav a:hover { color: #3C8DFF; }
     .admin-card { background: #ffffff; border-radius: 18px; box-shadow: 0 20px 60px rgba(15, 46, 91, 0.08); padding: 32px; }
+    textarea.js-rich-editor { min-height: 180px; }
     .rich-editor { border: 1px solid #dbe4f3; border-radius: 14px; overflow: hidden; background: #ffffff; box-shadow: inset 0 1px 2px rgba(15, 46, 91, 0.06); }
     .rich-toolbar { display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.45rem 0.55rem; background: #f0f5ff; border-bottom: 1px solid #dbe4f3; }
     .rich-toolbar button { border: none; background: transparent; color: #405275; border-radius: 8px; width: 2.2rem; height: 2.2rem; display: inline-flex; align-items: center; justify-content: center; font-size: 1rem; transition: background 0.2s ease, color 0.2s ease; }
@@ -194,11 +243,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Audience Category *</label>
+          <?php if ($hasCategoryColumn): ?>
           <select name="category" class="form-select" required>
             <option value="teachers">For Teachers</option>
             <option value="schools">For Schools</option>
             <option value="general" selected>General Insights</option>
           </select>
+          <?php else: ?>
+          <input type="hidden" name="category" value="general">
+          <div class="form-text text-muted">Categories will default to General until the database is updated.</div>
+          <?php endif; ?>
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Blog Type *</label>
@@ -231,6 +285,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Short Summary *</label>
+          <textarea name="summary" class="form-control js-rich-editor" rows="2" placeholder="Write a short summary that appears on the blog card." required></textarea>
+        </div>
+        <div class="col-12">
+          <label class="form-label fw-semibold">Main Content *</label>
+          <textarea name="content" class="form-control js-rich-editor" rows="8" placeholder="Share the full story, add headings, and include helpful links." required></textarea>
           <textarea name="summary" class="form-control js-rich-editor" rows="2" required></textarea>
         </div>
         <div class="col-12">
@@ -317,6 +376,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   <script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
   <script src="assets/js/footer.js"></script>
+  <script src="https://cdn.tiny.cloud/1/8n6fw6tstamnd3rc1e3gaye4n5f53gfatj9klefklbm7scjm/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cropperjs@1.5.13/dist/cropper.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.6/dist/ffmpeg.min.js"></script>
+  <script src="assets/js/admin-media-tools.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
   <script src="https://cdn.tiny.cloud/1/no-api-key/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
   <script>
     document.addEventListener('DOMContentLoaded', () => {
@@ -326,6 +391,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
       tinymce.init({
         selector: 'textarea.js-rich-editor',
+        plugins: 'advlist autolink lists link charmap preview anchor searchreplace visualblocks code fullscreen insertdatetime table help wordcount',
+        toolbar: 'undo redo | styles | bold italic underline | alignleft aligncenter alignright alignjustify | bullist numlist outdent indent | link | removeformat | code',
+        menubar: false,
+        branding: false,
+        skin: 'oxide',
+        content_css: 'default',
+        height: 340,
+        resize: true,
+        browser_spellcheck: true,
+        relative_urls: false,
+        remove_script_host: false,
+        convert_urls: false,
+        setup: function (editor) {
+          editor.on('init', function () {
+            editor.getContainer().style.transition = 'box-shadow 0.2s ease';
+          });
+        },
+        content_style: "body { font-family: 'Public Sans', sans-serif; font-size: 16px; line-height: 1.6; color: #23324d; }"
+      });
+
+      document.querySelectorAll('form').forEach(function (form) {
+        form.addEventListener('submit', function () {
         menubar: false,
         branding: false,
         plugins: 'lists link table image media code fullscreen autoresize',
