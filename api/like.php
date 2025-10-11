@@ -50,11 +50,15 @@ try {
   if ($token === '') { throw new Exception('Missing visitor token', 400); }
   if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
     $email = '';
+  if ($postId <= 0 || $token === '') { throw new Exception('Missing post_id or visitor_token', 400); }
+  if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+    throw new Exception('Invalid email address provided', 400);
   }
 
   $pdo->beginTransaction();
 
   $stmt = $pdo->prepare('SELECT id FROM blog_likes WHERE post_id = ? AND visitor_token = ? LIMIT 1');
+  $stmt = $pdo->prepare('SELECT id FROM blog_likes WHERE post_id = ? AND visitor_token = ?');
   $stmt->execute([$postId, $token]);
   $existing = $stmt->fetchColumn();
 
