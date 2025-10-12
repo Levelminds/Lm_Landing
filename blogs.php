@@ -62,18 +62,6 @@ function normaliseCategory($value): string
     return 'general';
 }
 
-function blogCategoryLabel(string $category): string
-{
-    switch (normaliseCategory($category)) {
-        case 'teachers':
-            return 'Teachers';
-        case 'schools':
-            return 'Schools';
-        default:
-            return 'General';
-    }
-}
-
 function blogExcerpt(array $post, int $limit = 180): string
 {
     $text = decodeBlogText($post['summary'] ?? '');
@@ -105,27 +93,6 @@ function blogReadTime(array $post): string
     $minutes = max(1, (int) ceil($words / 200));
 
     return sprintf('%d min read', $minutes);
-}
-
-function blogFullContent(array $post): string
-{
-    $content = decodeBlogHtml($post['content'] ?? '');
-
-    if ($content !== '') {
-        return $content;
-    }
-
-    $summary = decodeBlogHtml($post['summary'] ?? '');
-    if ($summary !== '') {
-        return $summary;
-    }
-
-    $excerpt = blogExcerpt($post);
-    if ($excerpt !== '') {
-        return '<p>' . htmlspecialchars($excerpt, ENT_QUOTES, 'UTF-8') . '</p>';
-    }
-
-    return '<p>Full story coming soon.</p>';
 }
 
 function blogMediaUrl(array $post): string
@@ -257,7 +224,7 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
       height: 100%;
       background: #fff;
       border-radius: 18px;
-      box-shadow: 0 10px 24px rgba(15, 37, 79, 0.07);
+      box-shadow: 0 12px 30px rgba(15, 37, 79, 0.08);
       overflow: hidden;
       display: flex;
       flex-direction: column;
@@ -265,12 +232,8 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
     }
 
     .blog-card:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 16px 32px rgba(15, 37, 79, 0.12);
-    }
-
-    .blog-card__media {
-      min-height: 170px;
+      transform: translateY(-4px);
+      box-shadow: 0 18px 38px rgba(15, 37, 79, 0.12);
     }
 
     .blog-card__media img {
@@ -280,10 +243,10 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
     }
 
     .blog-card__body {
-      padding: 1.25rem 1.35rem 1.5rem;
+      padding: 1.5rem;
       display: flex;
       flex-direction: column;
-      gap: .65rem;
+      gap: .75rem;
     }
 
     .blog-card__category {
@@ -305,7 +268,7 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
     }
 
     .blog-card__title {
-      font-size: 1.05rem;
+      font-size: 1.15rem;
       font-weight: 700;
       color: #0f254f;
       margin: 0;
@@ -313,7 +276,7 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
 
     .blog-card__summary {
       color: #47628b;
-      font-size: .94rem;
+      font-size: .98rem;
     }
 
     .blog-card__meta {
@@ -378,39 +341,6 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
       color: #d83c6b;
     }
 
-    #blogModal .modal-content {
-      border-radius: 20px;
-      border: none;
-      box-shadow: 0 24px 60px rgba(15, 37, 79, 0.18);
-    }
-
-    #blogModal .modal-header {
-      border-bottom: none;
-      padding: 1.5rem 2rem 0.5rem;
-    }
-
-    #blogModal .modal-body {
-      padding: 0 2rem 2rem;
-      color: #1a3663;
-      line-height: 1.7;
-    }
-
-    #blogModal .js-modal-meta {
-      color: #5a739d;
-    }
-
-    #blogModal .modal-footer {
-      border-top: none;
-      padding: 0 2rem 2rem;
-    }
-
-    #blogModal .modal-body img {
-      max-width: 100%;
-      height: auto;
-      border-radius: 16px;
-      margin: 1.25rem 0;
-    }
-
     .blog-categories {
       padding: 4rem 0 5rem;
     }
@@ -435,18 +365,6 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
 
       .blog-hero__card {
         border-radius: 20px;
-      }
-    }
-
-    @media (min-width: 992px) {
-      .blog-card__media {
-        min-height: 200px;
-      }
-    }
-
-    @media (max-width: 575.98px) {
-      .blog-card__body {
-        padding: 1.1rem 1.15rem 1.35rem;
       }
     }
   </style>
@@ -513,7 +431,7 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
             $featuredSummary = blogExcerpt($featured, 220);
             $featuredReadTime = blogReadTime($featured);
             $featuredCategory = normaliseCategory($featured['category'] ?? 'general');
-            $featuredCategoryLabel = blogCategoryLabel($featuredCategory);
+            $featuredCategoryLabel = ucfirst($featuredCategory === 'general' ? 'General' : $featuredCategory);
             $featuredShareUrl = sprintf('%s/blog_single.php?id=%d', $baseShareUrl, $featuredId);
           ?>
           <div class="blog-hero__card">
@@ -542,17 +460,7 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
                       <span><i class="bi bi-eye"></i><span class="js-view-count" data-post-id="<?php echo $featuredId; ?>"><?php echo number_format($featuredViews); ?></span> views</span>
                     </div>
                     <div class="d-flex flex-wrap gap-2">
-                      <a
-                        class="btn btn-read-more js-read-more"
-                        href="blog_single.php?id=<?php echo $featuredId; ?>"
-                        data-post-id="<?php echo $featuredId; ?>"
-                        data-title="<?php echo htmlspecialchars($featuredTitle, ENT_QUOTES, 'UTF-8'); ?>"
-                        data-author="<?php echo htmlspecialchars($featuredAuthor, ENT_QUOTES, 'UTF-8'); ?>"
-                        data-date="<?php echo htmlspecialchars($featuredDate, ENT_QUOTES, 'UTF-8'); ?>"
-                        data-read-time="<?php echo htmlspecialchars($featuredReadTime, ENT_QUOTES, 'UTF-8'); ?>"
-                        data-category="<?php echo htmlspecialchars($featuredCategoryLabel, ENT_QUOTES, 'UTF-8'); ?>"
-                        data-url="<?php echo htmlspecialchars($featuredShareUrl, ENT_QUOTES, 'UTF-8'); ?>"
-                      >Read More</a>
+                      <a class="btn btn-read-more js-read-more" href="blog_single.php?id=<?php echo $featuredId; ?>" data-post-id="<?php echo $featuredId; ?>">Read More</a>
                       <button class="blog-action js-like" type="button" data-post-id="<?php echo $featuredId; ?>">
                         <i class="bi bi-heart"></i>
                         <span class="js-like-label">Like</span>
@@ -603,7 +511,9 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
             <?php if (!$categoryPosts): ?>
               <?php continue; ?>
             <?php endif; ?>
-            <?php $categoryTitle = blogCategoryLabel($categoryKey); ?>
+            <?php
+              $categoryTitle = $categoryKey === 'general' ? 'General' : ucfirst($categoryKey);
+            ?>
             <div class="category-section" id="category-<?php echo htmlspecialchars($categoryKey, ENT_QUOTES, 'UTF-8'); ?>">
               <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-3">
                 <div>
@@ -645,17 +555,7 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
                             <span><i class="bi bi-eye"></i><span class="js-view-count" data-post-id="<?php echo $postId; ?>"><?php echo number_format($postViews); ?></span></span>
                             <span><i class="bi bi-heart"></i><span class="js-like-count" data-post-id="<?php echo $postId; ?>"><?php echo number_format($postLikes); ?></span></span>
                           </div>
-                          <a
-                            class="btn btn-read-more js-read-more"
-                            href="blog_single.php?id=<?php echo $postId; ?>"
-                            data-post-id="<?php echo $postId; ?>"
-                            data-title="<?php echo htmlspecialchars($postTitle, ENT_QUOTES, 'UTF-8'); ?>"
-                            data-author="<?php echo htmlspecialchars($postAuthor, ENT_QUOTES, 'UTF-8'); ?>"
-                            data-date="<?php echo htmlspecialchars($postDate, ENT_QUOTES, 'UTF-8'); ?>"
-                            data-read-time="<?php echo htmlspecialchars($postReadTime, ENT_QUOTES, 'UTF-8'); ?>"
-                            data-category="<?php echo htmlspecialchars($categoryTitle, ENT_QUOTES, 'UTF-8'); ?>"
-                            data-url="<?php echo htmlspecialchars($shareUrl, ENT_QUOTES, 'UTF-8'); ?>"
-                          >Read More</a>
+                          <a class="btn btn-read-more js-read-more" href="blog_single.php?id=<?php echo $postId; ?>" data-post-id="<?php echo $postId; ?>">Read More</a>
                         </div>
                         <div class="d-flex flex-wrap gap-2 mt-3">
                           <button class="blog-action js-like" type="button" data-post-id="<?php echo $postId; ?>">
@@ -694,28 +594,6 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
   <?php endforeach; ?>
 
   <?php include 'footer.html'; ?>
-
-  <div class="modal fade" id="blogModal" tabindex="-1" aria-labelledby="blogModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable modal-dialog-centered">
-      <div class="modal-content">
-        <div class="modal-header">
-          <div>
-            <span class="badge rounded-pill bg-primary-subtle text-primary-emphasis mb-2 js-modal-category d-none"></span>
-            <h2 class="modal-title h4 mb-0 js-modal-title" id="blogModalLabel"></h2>
-            <p class="text-muted small mb-0 js-modal-meta d-none"></p>
-          </div>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <div class="js-modal-body"></div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
-          <a class="btn btn-read-more js-modal-link" href="#" target="_blank" rel="noopener">Open Full Post</a>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1080;">
     <div id="shareToast" class="toast align-items-center" role="status" aria-live="polite" aria-atomic="true">
@@ -797,12 +675,17 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
           if (label) {
             label.textContent = liked ? 'Liked' : 'Like';
           }
-        });
+        }
+
+        const modalLink = modalElement.querySelector('.js-modal-link');
+        if (modalLink) {
+          modalLink.href = data.url || '#';
+        }
       }
 
       function updateViewCount(postId, newCount) {
         document.querySelectorAll(`.js-view-count[data-post-id="${postId}"]`).forEach((node) => {
-          node.textContent = formatNumber(newCount);
+          node.textContent = new Intl.NumberFormat().format(newCount);
         });
       }
 
@@ -826,82 +709,6 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
           }
         } catch (error) {
           console.error(error);
-        }
-      }
-
-      const openedPosts = new Set();
-      const modalElement = document.getElementById('blogModal');
-
-      function buildMeta(author, date, readTime) {
-        return [author, date, readTime].filter(Boolean).join(' • ');
-      }
-
-      function setModalContent(data) {
-        if (!modalElement) {
-          return;
-        }
-
-        const modalTitle = modalElement.querySelector('.js-modal-title');
-        if (modalTitle) {
-          modalTitle.textContent = data.title || '';
-        }
-
-        const modalCategory = modalElement.querySelector('.js-modal-category');
-        if (modalCategory) {
-          const hasCategory = Boolean(data.category);
-          modalCategory.textContent = hasCategory ? data.category : '';
-          modalCategory.classList.toggle('d-none', !hasCategory);
-        }
-
-        const modalMeta = modalElement.querySelector('.js-modal-meta');
-        if (modalMeta) {
-          const metaText = buildMeta(data.author, data.date, data.readTime);
-          modalMeta.textContent = metaText;
-          modalMeta.classList.toggle('d-none', metaText === '');
-        }
-
-        const modalBody = modalElement.querySelector('.js-modal-body');
-        if (modalBody) {
-          const template = document.getElementById(`blog-modal-content-${data.id}`);
-          if (template) {
-            modalBody.innerHTML = template.innerHTML;
-          } else {
-            modalBody.innerHTML = '<p class="mb-0">This story will be available soon.</p>';
-          }
-        }
-
-        const modalLink = modalElement.querySelector('.js-modal-link');
-        if (modalLink) {
-          modalLink.href = data.url || '#';
-        }
-      }
-
-      function openModalForPost(anchor) {
-        const postId = Number(anchor.dataset.postId);
-        if (!postId) {
-          return;
-        }
-
-        if (!modalElement) {
-          window.location.href = anchor.getAttribute('href');
-          return;
-        }
-
-        setModalContent({
-          id: postId,
-          title: anchor.dataset.title || anchor.textContent || '',
-          author: anchor.dataset.author || '',
-          date: anchor.dataset.date || '',
-          readTime: anchor.dataset.readTime || '',
-          category: anchor.dataset.category || '',
-          url: anchor.dataset.url || anchor.getAttribute('href') || '#',
-        });
-
-        bootstrap.Modal.getOrCreateInstance(modalElement).show();
-
-        if (!openedPosts.has(postId)) {
-          openedPosts.add(postId);
-          incrementViews(postId);
         }
       }
 
@@ -974,7 +781,7 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
         });
       }
 
-      function handleReadMore(event) {
+      async function handleReadMore(event) {
         const anchor = event.currentTarget;
         const postId = Number(anchor.dataset.postId);
         if (!postId) {
@@ -982,7 +789,12 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
         }
 
         event.preventDefault();
-        openModalForPost(anchor);
+        anchor.classList.add('disabled');
+        anchor.setAttribute('aria-disabled', 'true');
+
+        await incrementViews(postId);
+
+        window.location.href = anchor.getAttribute('href');
       }
 
       async function handleShare(event) {
