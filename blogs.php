@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 $host = 'localhost';
 $dbname = 'u420143207_LM_landing';
 $username = 'u420143207_lmlanding';
@@ -6,27 +8,6 @@ $password = 'Levelminds@2024';
 
 $posts = [];
 $error = '';
-$pdo = null;
-
-function deduplicateBlogPosts(array $items): array
-{
-    $unique = [];
-    $seen = [];
-
-    foreach ($items as $item) {
-        $id = isset($item['id']) ? (string) $item['id'] : '';
-        $key = $id !== '' ? $id : sha1(json_encode($item));
-
-        if (isset($seen[$key])) {
-            continue;
-        }
-
-        $seen[$key] = true;
-        $unique[] = $item;
-    }
-
-    return $unique;
-}
 
 function decodeBlogHtml($value): string
 {
@@ -35,7 +16,7 @@ function decodeBlogHtml($value): string
 
 function decodeBlogText($value): string
 {
-    return trim(html_entity_decode(strip_tags((string) $value), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+    return trim(strip_tags(decodeBlogHtml($value)));
 }
 
 function formatBlogDate($value): string
@@ -46,11 +27,99 @@ function formatBlogDate($value): string
 
     try {
         $date = new DateTime($value);
-
         return $date->format('M j, Y');
-    } catch (Exception $e) {
+    } catch (Throwable $exception) {
         return '—';
     }
+}
+
+function normaliseCategory($value): string
+{
+    $normalised = strtolower(trim((string) $value));
+
+    $mapping = [
+        'teacher' => 'teachers',
+        'teachers' => 'teachers',
+        'school' => 'schools',
+        'schools' => 'schools',
+        'general' => 'general',
+    ];
+
+    return $mapping[$normalised] ?? 'general';
+}
+
+function blogCategoryLabel(string $category): string
+{
+    switch (normaliseCategory($category)) {
+        case 'teachers':
+            return 'Teachers';
+        case 'schools':
+            return 'Schools';
+        default:
+            return 'General';
+    }
+}
+
+function mbStringLength(string $value): int
+{
+    return function_exists('mb_strlen') ? mb_strlen($value, 'UTF-8') : strlen($value);
+}
+
+function mbStringSlice(string $value, int $start, int $length): string
+{
+    return function_exists('mb_substr') ? mb_substr($value, $start, $length, 'UTF-8') : substr($value, $start, $length);
+}
+
+function blogExcerpt(array $post, int $limit = 140): string
+{
+    $text = decodeBlogText($post['summary'] ?? '');
+
+    if ($text === '') {
+        $text = decodeBlogText($post['content'] ?? '');
+    }
+
+    if ($text === '') {
+        return '';
+    }
+
+    if (mbStringLength($text) > $limit) {
+        return rtrim(mbStringSlice($text, 0, $limit - 1)) . '…';
+    }
+
+    return $text;
+}
+
+function blogReadTime(array $post): string
+{
+    $content = decodeBlogHtml($post['content'] ?? '');
+
+    if ($content === '') {
+        $content = decodeBlogHtml($post['summary'] ?? '');
+    }
+
+    if ($content === '') {
+        return '';
+    }
+
+    $words = str_word_count(strip_tags($content));
+    if ($words === 0) {
+        return '';
+    }
+
+    $minutes = max(1, (int) ceil($words / 200));
+
+    return sprintf('%d min read', $minutes);
+}
+
+function blogMediaUrl(array $post): string
+{
+    $url = trim((string) ($post['media_url'] ?? ''));
+
+    if ($url !== '') {
+        return $url;
+    }
+
+    return 'assets/images/img-1-min.jpg';
 }
 
 try {
@@ -58,74 +127,39 @@ try {
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     ]);
 
-    $columns = 'id, title, author, summary, content, media_type, media_url, created_at, views, likes, category';
-    $stmt = $pdo->query("SELECT $columns FROM blog_posts WHERE status = 'published' ORDER BY created_at DESC");
-    $posts = $stmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (PDOException $e) {
-    $error = 'Unable to load blog posts right now.';
+    $columns = 'id, title, author, summary, content, media_type, media_url, created_at, views, likes, category, status';
+
+    $statement = $pdo->prepare(
+        "SELECT $columns FROM blog_posts WHERE LOWER(status) IN ('published', 'approved') ORDER BY created_at DESC"
+    );
+
+    $statement->execute();
+    $posts = $statement->fetchAll(PDO::FETCH_ASSOC) ?: [];
+} catch (PDOException $exception) {
+    $error = 'We\'re having trouble loading the latest stories right now. Please try again soon.';
 }
 
-if (!$posts) {
-    $fallbackPath = __DIR__ . '/data/blogs.json';
-
-    if (is_readable($fallbackPath)) {
-        $json = json_decode((string) file_get_contents($fallbackPath), true);
-
-        if (is_array($json)) {
-            $posts = $json;
-        }
-    }
-}
-
-$posts = deduplicateBlogPosts($posts);
 $featured = $posts[0] ?? null;
-
-$audienceLabels = [
-    'teachers' => 'For Teachers',
-    'schools'  => 'For Schools',
-    'general'  => 'General Insights',
+$categoryBuckets = [
+    'teachers' => [],
+    'schools' => [],
+    'general' => [],
 ];
 
-$groupedPosts = [];
-foreach ($posts as $post) {
-    $category = $post['category'] ?? 'general';
-
-    if (!isset($groupedPosts[$category])) {
-        $groupedPosts[$category] = [];
+foreach ($posts as $index => $post) {
+    if ($index === 0) {
+        continue;
     }
 
-    $groupedPosts[$category][] = $post;
+    $category = normaliseCategory($post['category'] ?? 'general');
+    $categoryBuckets[$category][] = $post;
 }
 
-if ($featured) {
-    $featuredId = (int) ($featured['id'] ?? 0);
-    $featuredCategory = $featured['category'] ?? 'general';
+$hasPosts = !empty($posts);
 
-    if ($featuredId && isset($groupedPosts[$featuredCategory])) {
-        $groupedPosts[$featuredCategory] = array_values(array_filter(
-            $groupedPosts[$featuredCategory],
-            static function ($item) use ($featuredId) {
-                return (int) ($item['id'] ?? 0) !== $featuredId;
-            }
-        ));
-
-        if (!$groupedPosts[$featuredCategory]) {
-            unset($groupedPosts[$featuredCategory]);
-        }
-    }
-}
-
-$preferredOrder = ['teachers', 'schools', 'general'];
-$availableCategories = array_keys($groupedPosts);
-$orderedCategories = array_values(array_intersect($preferredOrder, $availableCategories));
-
-foreach ($availableCategories as $category) {
-    if (!in_array($category, $orderedCategories, true)) {
-        $orderedCategories[] = $category;
-    }
-}
-
-$categoryFilters = array_unique(array_merge(['all'], $preferredOrder, array_diff($availableCategories, $preferredOrder)));
+$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+$hostName = $_SERVER['HTTP_HOST'] ?? 'www.levelminds.in';
+$baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -134,290 +168,474 @@ $categoryFilters = array_unique(array_merge(['all'], $preferredOrder, array_diff
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LevelMinds Blog | Hiring Insights for Schools & Teachers</title>
-  <meta name="description" content="Explore insights, playbooks, and stories to help schools hire the right educators and help teachers grow careers they love.">
-  <link rel="icon" href="assets/images/logo/logo.svg" type="image/svg+xml">
+  <meta name="description" content="Explore insights, playbooks, and stories from the LevelMinds community." />
   <link rel="icon" type="image/png" sizes="32x32" href="assets/images/logo/logo.svg">
   <link rel="icon" type="image/png" sizes="16x16" href="assets/images/logo/logo.svg">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/images/logo/logo.svg">
+  <link rel="apple-touch-icon" sizes="152x152" href="assets/images/logo/logo.svg">
+  <link rel="apple-touch-icon" sizes="120x120" href="assets/images/logo/logo.svg">
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/images/logo/logo.svg">
+  <link rel="icon" type="image/png" sizes="512x512" href="assets/images/logo/logo.svg">
   <link rel="manifest" href="assets/images/logo/logo.svg">
-  <meta name="msapplication-TileImage" content="assets/images/logo/logo.svg">
-  <meta name="msapplication-TileColor" content="#ffffff">
-  <link rel="canonical" href="https://LevelMinds.com/blogs.php">
-
+  <link rel="icon" href="assets/images/logo/logo.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-
   <link href="assets/vendors/bootstrap/bootstrap.min.css" rel="stylesheet">
   <link href="assets/vendors/bootstrap-icons/font/bootstrap-icons.min.css" rel="stylesheet">
   <link href="assets/css/style.css" rel="stylesheet">
   <link href="assets/css/custom.css" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Public Sans', sans-serif;
+      background-color: #ffffff;
+      color: #0f254f;
+    }
+
+    .fbs__net-navbar {
+      background-color: #ffffff !important;
+      box-shadow: 0 4px 18px rgba(15, 37, 79, 0.07);
+    }
+
+    .blog-main {
+      background: linear-gradient(180deg, #f5f9ff 0%, #ffffff 35%);
+    }
+
+    .blog-hero {
+      padding: 6rem 0 4rem;
+    }
+
+    .blog-hero__card {
+      border-radius: 28px;
+      overflow: hidden;
+      background: #ffffff;
+      box-shadow: 0 24px 55px rgba(15, 37, 79, 0.12);
+    }
+
+    .blog-hero__body {
+      padding: 2.75rem;
+    }
+
+    .blog-hero__meta span {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.95rem;
+      color: #47628b;
+    }
+
+    .blog-hero__actions .btn-read-more {
+      background: #1f6ae1;
+      color: #ffffff;
+      border: none;
+      padding: 0.75rem 1.75rem;
+      border-radius: 999px;
+      font-weight: 600;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .blog-hero__actions .btn-read-more:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 26px rgba(31, 106, 225, 0.2);
+    }
+
+    .blog-hero__image img {
+      object-fit: cover;
+      height: 100%;
+    }
+
+    .section-heading {
+      margin-bottom: 1rem;
+    }
+
+    .section-heading h2 {
+      font-weight: 700;
+      color: #0f254f;
+    }
+
+    .section-heading p {
+      color: #4c6294;
+      max-width: 660px;
+      margin: 0 auto;
+    }
+
+    .category-row {
+      margin-top: 2.5rem;
+    }
+
+    .category-label {
+      display: inline-block;
+      font-size: 0.85rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: #1f6ae1;
+    }
+
+    .blog-card {
+      border-radius: 22px;
+      overflow: hidden;
+      background: #ffffff;
+      border: 1px solid rgba(31, 106, 225, 0.08);
+      box-shadow: 0 14px 34px rgba(15, 37, 79, 0.08);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .blog-card:hover {
+      transform: translateY(-6px);
+      box-shadow: 0 24px 48px rgba(15, 37, 79, 0.12);
+    }
+
+    .blog-card__media img {
+      height: 180px;
+      object-fit: cover;
+      width: 100%;
+    }
+
+    .blog-card__body {
+      padding: 1.5rem;
+    }
+
+    .blog-card__title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 0.6rem;
+      color: #0f254f;
+    }
+
+    .blog-card__summary {
+      color: #4c6294;
+      font-size: 0.95rem;
+      margin-bottom: 1rem;
+      min-height: 3.5rem;
+    }
+
+    .blog-card__meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      font-size: 0.85rem;
+      color: #60749c;
+    }
+
+    .blog-card__meta span {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .blog-card__footer {
+      margin-top: 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .btn-read-more {
+      background: #1f6ae1;
+      color: #ffffff;
+      border: none;
+      padding: 0.55rem 1.35rem;
+      border-radius: 999px;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    .blog-card__stats {
+      display: flex;
+      gap: 1rem;
+      color: #60749c;
+      font-size: 0.85rem;
+    }
+
+    .blog-card__stats span {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .blog-action {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      font-size: 0.9rem;
+      padding: 0.55rem 1.1rem;
+      border-radius: 999px;
+      border: 1px solid rgba(31, 106, 225, 0.2);
+      background: rgba(31, 106, 225, 0.08);
+      color: #1f3c6d;
+      transition: all 0.2s ease;
+    }
+
+    .blog-action:hover,
+    .blog-action.is-liked {
+      background: #1f6ae1;
+      color: #ffffff;
+      border-color: #1f6ae1;
+    }
+
+    .modal-content {
+      border-radius: 20px;
+      border: none;
+      box-shadow: 0 24px 60px rgba(15, 37, 79, 0.2);
+    }
+
+    .modal-body {
+      color: #3a4f7a;
+      line-height: 1.7;
+    }
+
+    .modal-body p {
+      font-size: 1.02rem;
+    }
+
+    .empty-state {
+      background: #ffffff;
+      border-radius: 24px;
+      padding: 3rem;
+      box-shadow: 0 18px 40px rgba(15, 37, 79, 0.12);
+      text-align: center;
+    }
+
+    @media (max-width: 991.98px) {
+      .blog-hero {
+        padding: 5rem 0 3rem;
+      }
+
+      .blog-hero__body {
+        padding: 2rem;
+      }
+
+      .blog-card__media img {
+        height: 200px;
+      }
+    }
+
+    @media (max-width: 575.98px) {
+      .blog-card__body {
+        padding: 1.3rem;
+      }
+
+      .blog-card__summary {
+        min-height: auto;
+      }
+    }
+  </style>
 </head>
 
-<body class="blog-page">
-  <header class="fbs__net-navbar navbar navbar-expand-lg navbar-light" aria-label="LevelMinds navbar">
-    <div class="container d-flex align-items-center justify-content-between">
-      <a class="navbar-brand w-auto" href="index.html">
-        <img src="assets/images/logo/logo.svg" alt="LevelMinds" class="logo" height="40">
-      </a>
+<body class="bg-white">
+  <?php include 'team_header.tmp'; ?>
 
-      <div class="offcanvas offcanvas-start w-75" id="fbs__net-navbars" tabindex="-1" aria-labelledby="fbs__net-navbarsLabel">
-        <div class="offcanvas-header">
-          <div class="offcanvas-header-logo">
-            <a class="logo-link" id="fbs__net-navbarsLabel" href="index.html">
-              <img src="assets/images/logo/logo.svg" alt="LevelMinds" class="logo" height="35">
-            </a>
-          </div>
-          <button class="btn-close text-reset" type="button" data-bs-dismiss="offcanvas" aria-label="Close"></button>
-        </div>
-
-        <div class="offcanvas-body align-items-lg-center">
-          <ul class="navbar-nav nav me-auto ps-lg-5 mb-2 mb-lg-0">
-            <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
-            <li class="nav-item"><a class="nav-link" href="team.html">Team</a></li>
-            <li class="nav-item"><a class="nav-link" href="tour.html">Tour</a></li>
-            <li class="nav-item"><a class="nav-link active" href="blogs.php" aria-current="page">Blogs</a></li>
-            <li class="nav-item"><a class="nav-link" href="career.html">Careers</a></li>
-            <li class="nav-item"><a class="nav-link" href="contact.html">Contact</a></li>
-          </ul>
-          <div class="d-lg-none mt-4 w-100">
-            <a class="btn btn-nav-outline w-100" href="https://www.staging.levelminds.in" target="_blank" rel="noopener">Login</a>
-          </div>
-        </div>
-      </div>
-
-      <div class="d-flex align-items-center gap-3">
-        <div class="header-actions d-none d-lg-flex align-items-center gap-2">
-          <a class="btn btn-nav-outline" href="https://www.staging.levelminds.in" target="_blank" rel="noopener">Login</a>
-        </div>
-        <button class="fbs__net-navbar-toggler d-lg-none" type="button" data-bs-toggle="offcanvas" data-bs-target="#fbs__net-navbars" aria-controls="fbs__net-navbars" aria-label="Toggle navigation">
-          <svg class="fbs__net-icon-menu" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="21" x2="3" y1="6" y2="6"></line>
-            <line x1="21" x2="3" y1="12" y2="12"></line>
-            <line x1="21" x2="3" y1="18" y2="18"></line>
-          </svg>
-        </button>
-      </div>
-    </div>
-  </header>
-
-  <main class="blog-main">
-    <?php if ($featured): ?>
-      <?php
-        $featuredId = (int) ($featured['id'] ?? 0);
-        $featuredTitle = decodeBlogText($featured['title'] ?? '');
-        $featuredAuthor = decodeBlogText($featured['author'] ?? '');
-        $featuredSummary = decodeBlogText($featured['summary'] ?? '');
-        $featuredContent = decodeBlogHtml($featured['content'] ?? '');
-        $featuredDate = formatBlogDate($featured['created_at'] ?? '');
-        $featuredViews = (int) ($featured['views'] ?? 0);
-        $featuredLikes = (int) ($featured['likes'] ?? 0);
-        $featuredCategory = $featured['category'] ?? 'general';
-        $featuredMediaType = strtolower((string) ($featured['media_type'] ?? 'image'));
-        $featuredMediaUrl = trim((string) ($featured['media_url'] ?? ''));
-        $featuredShareUrl = sprintf('%s#post-%d', htmlspecialchars($_SERVER['REQUEST_URI'] ?? 'blogs.php', ENT_QUOTES, 'UTF-8'), $featuredId ?: 0);
-      ?>
-      <section class="blog-hero has-featured">
-        <div class="container">
+  <main class="blog-main mt-5 pt-4">
+    <section class="blog-hero">
+      <div class="container">
+        <?php if ($featured): ?>
+          <?php
+            $featuredId = (int) ($featured['id'] ?? 0);
+            $featuredTitle = decodeBlogText($featured['title'] ?? '');
+            $featuredAuthor = decodeBlogText($featured['author'] ?? 'LevelMinds Team');
+            $featuredDate = formatBlogDate($featured['created_at'] ?? '');
+            $featuredViews = (int) ($featured['views'] ?? 0);
+            $featuredLikes = (int) ($featured['likes'] ?? 0);
+            $featuredSummary = blogExcerpt($featured, 220);
+            $featuredReadTime = blogReadTime($featured);
+            $featuredCategory = normaliseCategory($featured['category'] ?? 'general');
+            $featuredCategoryLabel = blogCategoryLabel($featuredCategory);
+            $featuredShareUrl = sprintf('%s/blog_single.php?id=%d', $baseShareUrl, $featuredId);
+          ?>
           <div class="blog-hero__card">
-            <div class="row g-5 align-items-center">
+            <div class="row g-0 align-items-stretch">
               <div class="col-lg-6">
-                <div class="blog-hero__content">
-                  <span class="blog-hero__eyebrow">Stories &amp; strategies for modern learning teams</span>
-                  <h1 class="blog-hero__title"><?php echo htmlspecialchars($featuredTitle, ENT_QUOTES, 'UTF-8'); ?></h1>
-                  <p class="blog-hero__description"><?php echo htmlspecialchars($featuredSummary, ENT_QUOTES, 'UTF-8'); ?></p>
-                  <div class="blog-meta">
-                    <span><i class="bi bi-person-circle"></i><?php echo htmlspecialchars($featuredAuthor ?: 'LevelMinds Team', ENT_QUOTES, 'UTF-8'); ?></span>
+                <div class="blog-hero__image h-100">
+                  <img src="<?php echo htmlspecialchars(blogMediaUrl($featured), ENT_QUOTES, 'UTF-8'); ?>" alt="<?php echo htmlspecialchars($featuredTitle, ENT_QUOTES, 'UTF-8'); ?>" class="w-100 h-100">
+                </div>
+              </div>
+              <div class="col-lg-6 d-flex align-items-center">
+                <div class="blog-hero__body w-100">
+                  <span class="badge rounded-pill bg-primary-subtle text-primary-emphasis mb-3">Featured • <?php echo htmlspecialchars($featuredCategoryLabel, ENT_QUOTES, 'UTF-8'); ?></span>
+                  <h1 class="display-6 fw-bold mb-3" style="color:#0f254f;"><?php echo htmlspecialchars($featuredTitle, ENT_QUOTES, 'UTF-8'); ?></h1>
+                  <?php if ($featuredSummary !== ''): ?>
+                    <p class="lead" style="color:#47628b;"><?php echo htmlspecialchars($featuredSummary, ENT_QUOTES, 'UTF-8'); ?></p>
+                  <?php endif; ?>
+                  <div class="blog-hero__meta d-flex flex-wrap gap-3 mt-4 mb-4">
+                    <span><i class="bi bi-person-circle"></i><?php echo htmlspecialchars($featuredAuthor, ENT_QUOTES, 'UTF-8'); ?></span>
                     <span><i class="bi bi-calendar3"></i><?php echo htmlspecialchars($featuredDate, ENT_QUOTES, 'UTF-8'); ?></span>
-                    <span><i class="bi bi-eye"></i><?php echo number_format($featuredViews); ?> views</span>
-                    <span><i class="bi bi-heart"></i><span class="like-count"><?php echo number_format($featuredLikes); ?></span> likes</span>
+                    <?php if ($featuredReadTime !== ''): ?>
+                      <span><i class="bi bi-clock-history"></i><?php echo htmlspecialchars($featuredReadTime, ENT_QUOTES, 'UTF-8'); ?></span>
+                    <?php endif; ?>
+                    <span><i class="bi bi-eye"></i><span class="js-view-count" data-post-id="<?php echo $featuredId; ?>"><?php echo number_format($featuredViews); ?></span> views</span>
                   </div>
-                  <div class="blog-hero__actions">
-                    <button class="btn btn-primary btn-lg js-read-story" type="button"
-                            data-post-id="<?php echo $featuredId; ?>"
-                            data-title="<?php echo htmlspecialchars($featuredTitle, ENT_QUOTES, 'UTF-8'); ?>"
-                            data-author="<?php echo htmlspecialchars($featuredAuthor ?: 'LevelMinds Team', ENT_QUOTES, 'UTF-8'); ?>"
-                            data-date="<?php echo htmlspecialchars($featuredDate, ENT_QUOTES, 'UTF-8'); ?>"
-                            data-content="<?php echo htmlspecialchars($featuredContent, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
-                      Read Full Story
-                    </button>
-                    <button class="btn btn-lg blog-like-btn" type="button"
-                            data-post-id="<?php echo $featuredId; ?>"
-                            data-likes="<?php echo $featuredLikes; ?>">
+                  <div class="blog-hero__actions d-flex flex-wrap gap-2 align-items-center">
+                    <button
+                      class="btn btn-read-more js-read-more"
+                      type="button"
+                      data-post-id="<?php echo $featuredId; ?>"
+                      data-title="<?php echo htmlspecialchars($featuredTitle, ENT_QUOTES, 'UTF-8'); ?>"
+                      data-author="<?php echo htmlspecialchars($featuredAuthor, ENT_QUOTES, 'UTF-8'); ?>"
+                      data-date="<?php echo htmlspecialchars($featuredDate, ENT_QUOTES, 'UTF-8'); ?>"
+                      data-read-time="<?php echo htmlspecialchars($featuredReadTime, ENT_QUOTES, 'UTF-8'); ?>"
+                      data-category="<?php echo htmlspecialchars($featuredCategoryLabel, ENT_QUOTES, 'UTF-8'); ?>"
+                      data-share-url="<?php echo htmlspecialchars($featuredShareUrl, ENT_QUOTES, 'UTF-8'); ?>"
+                    >Read More</button>
+                    <button class="blog-action js-like" type="button" data-post-id="<?php echo $featuredId; ?>">
                       <i class="bi bi-heart"></i>
-                      <span class="blog-like-btn__label">Like</span>
-                      <span class="blog-like-btn__count"><?php echo number_format($featuredLikes); ?></span>
+                      <span class="js-like-label">Like</span>
+                      <span class="js-like-count" data-post-id="<?php echo $featuredId; ?>"><?php echo number_format($featuredLikes); ?></span>
                     </button>
-                    <button class="btn btn-lg blog-share-btn" type="button"
-                            data-share-title="<?php echo htmlspecialchars($featuredTitle, ENT_QUOTES, 'UTF-8'); ?>"
-                            data-share-text="<?php echo htmlspecialchars($featuredSummary, ENT_QUOTES, 'UTF-8'); ?>"
-                            data-share-url="<?php echo htmlspecialchars($featuredShareUrl, ENT_QUOTES, 'UTF-8'); ?>">
+                    <button class="blog-action js-share" type="button" data-share-title="<?php echo htmlspecialchars($featuredTitle, ENT_QUOTES, 'UTF-8'); ?>" data-share-text="<?php echo htmlspecialchars($featuredSummary !== '' ? $featuredSummary : $featuredTitle, ENT_QUOTES, 'UTF-8'); ?>" data-share-url="<?php echo htmlspecialchars($featuredShareUrl, ENT_QUOTES, 'UTF-8'); ?>">
                       <i class="bi bi-share"></i>
                       Share
                     </button>
                   </div>
                 </div>
               </div>
-              <div class="col-lg-6">
-                <div class="blog-hero__media">
-                  <span class="blog-hero__category">
-                    Featured • <?php echo htmlspecialchars($audienceLabels[$featuredCategory] ?? ucfirst($featuredCategory), ENT_QUOTES, 'UTF-8'); ?>
-                  </span>
-                  <div class="blog-hero__media-frame ratio ratio-16x9">
-                    <?php if ($featuredMediaType === 'video' && $featuredMediaUrl): ?>
-                      <iframe src="<?php echo htmlspecialchars($featuredMediaUrl, ENT_QUOTES, 'UTF-8'); ?>" title="Featured video" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe>
-                    <?php elseif ($featuredMediaUrl): ?>
-                      <img src="<?php echo htmlspecialchars($featuredMediaUrl, ENT_QUOTES, 'UTF-8'); ?>" alt="<?php echo htmlspecialchars($featuredTitle, ENT_QUOTES, 'UTF-8'); ?>" class="img-fluid">
-                    <?php else: ?>
-                      <div class="blog-hero__placeholder">
-                        <i class="bi bi-image"></i>
-                      </div>
-                    <?php endif; ?>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
-        </div>
-      </section>
-    <?php else: ?>
-      <section class="blog-hero">
-        <div class="container">
-          <div class="row align-items-center g-5">
-            <div class="col-lg-8 mx-auto text-center">
-              <h1 class="blog-hero__title">LevelMinds Blog</h1>
-              <p class="blog-hero__description">Insights, playbooks, and stories to help schools hire the right educators—and help teachers grow careers they love.</p>
-            </div>
+        <?php elseif ($error !== ''): ?>
+          <div class="empty-state">
+            <h1 class="h3 mb-2" style="color:#0f254f;">Hang tight!</h1>
+            <p class="mb-0" style="color:#4c6294;">We&apos;re having trouble loading fresh stories right now. Please refresh or try again later.</p>
           </div>
-        </div>
-      </section>
-    <?php endif; ?>
-
-    <section class="blog-filter">
-      <div class="container">
-        <div class="row g-4 align-items-center">
-          <div class="col-lg-6">
-            <h2 class="blog-filter__title">Discover blogs by categories</h2>
-            <p class="blog-filter__description">Filter stories tailored for teachers, school leaders, and the broader education community.</p>
+        <?php else: ?>
+          <div class="empty-state">
+            <h1 class="h3 mb-2" style="color:#0f254f;">LevelMinds Blogs</h1>
+            <p class="mb-0" style="color:#4c6294;">Discover stories from real educators, school leaders, and the LevelMinds team.</p>
           </div>
-          <div class="col-lg-6">
-            <div class="blog-filter__actions d-flex flex-wrap gap-2 justify-content-lg-end">
-              <?php foreach ($categoryFilters as $filter): ?>
-                <?php $label = $filter === 'all' ? 'All Posts' : ($audienceLabels[$filter] ?? ucfirst($filter)); ?>
-                <button class="btn btn-filter<?php echo $filter === 'all' ? ' active' : ''; ?>" type="button" data-filter="<?php echo htmlspecialchars($filter, ENT_QUOTES, 'UTF-8'); ?>">
-                  <?php echo htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?>
-                </button>
-              <?php endforeach; ?>
-            </div>
-          </div>
-        </div>
+        <?php endif; ?>
       </div>
     </section>
 
-    <section class="blog-grid">
+    <section class="blog-categories pb-5">
       <div class="container">
-        <?php if (!$posts): ?>
-          <div class="row justify-content-center">
-            <div class="col-md-8">
-              <div class="alert alert-info text-center mb-0">No blog posts available right now. Please check back soon.</div>
+        <div class="section-heading text-center">
+          <h2>Discover Blogs by Categories</h2>
+          <p>Curated insights for teachers, schools, and the entire education community.</p>
+        </div>
+
+        <?php foreach ($categoryBuckets as $categoryKey => $categoryPosts): ?>
+          <?php
+            $categoryTitle = blogCategoryLabel($categoryKey);
+          ?>
+          <div class="category-row">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+              <span class="category-label">For <?php echo htmlspecialchars($categoryTitle, ENT_QUOTES, 'UTF-8'); ?></span>
+              <div class="blog-card__stats text-uppercase" style="font-size:0.75rem; letter-spacing:0.12em; color:#8a9bbf;">
+                <span><?php echo count($categoryPosts); ?> Articles</span>
+              </div>
             </div>
-          </div>
-        <?php else: ?>
-          <div class="row g-4" id="blogCards">
-            <?php foreach ($orderedCategories as $category): ?>
-              <?php foreach ($groupedPosts[$category] as $post): ?>
-                <?php
-                  $postId = (int) ($post['id'] ?? 0);
-                  $postTitle = decodeBlogText($post['title'] ?? '');
-                  $postAuthor = decodeBlogText($post['author'] ?? 'LevelMinds Team');
-                  $postSummary = decodeBlogText($post['summary'] ?? '');
-                  $postContent = decodeBlogHtml($post['content'] ?? '');
-                  $postDate = formatBlogDate($post['created_at'] ?? '');
-                  $postViews = (int) ($post['views'] ?? 0);
-                  $postLikes = (int) ($post['likes'] ?? 0);
-                  $postMediaType = strtolower((string) ($post['media_type'] ?? 'image'));
-                  $postMediaUrl = trim((string) ($post['media_url'] ?? ''));
-                  $shareUrl = sprintf('%s#post-%d', htmlspecialchars($_SERVER['REQUEST_URI'] ?? 'blogs.php', ENT_QUOTES, 'UTF-8'), $postId ?: 0);
-                  $categoryLabel = $audienceLabels[$category] ?? ucfirst($category);
-                ?>
-                <div class="col-sm-6 col-lg-4" data-category="<?php echo htmlspecialchars($category, ENT_QUOTES, 'UTF-8'); ?>">
-                  <article class="blog-card" id="post-<?php echo $postId; ?>">
-                    <div class="blog-card__media ratio ratio-16x9">
-                      <?php if ($postMediaType === 'video' && $postMediaUrl): ?>
-                        <iframe src="<?php echo htmlspecialchars($postMediaUrl, ENT_QUOTES, 'UTF-8'); ?>" title="<?php echo htmlspecialchars($postTitle, ENT_QUOTES, 'UTF-8'); ?>" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe>
-                      <?php elseif ($postMediaUrl): ?>
-                        <img src="<?php echo htmlspecialchars($postMediaUrl, ENT_QUOTES, 'UTF-8'); ?>" alt="<?php echo htmlspecialchars($postTitle, ENT_QUOTES, 'UTF-8'); ?>" class="img-fluid">
-                      <?php else: ?>
-                        <div class="blog-card__placeholder">
-                          <i class="bi bi-image"></i>
-                        </div>
-                      <?php endif; ?>
-                    </div>
-                    <div class="blog-card__body">
-                      <span class="blog-card__category mb-2"><?php echo htmlspecialchars($categoryLabel, ENT_QUOTES, 'UTF-8'); ?></span>
-                      <h3 class="blog-card__title"><?php echo htmlspecialchars($postTitle, ENT_QUOTES, 'UTF-8'); ?></h3>
-                      <p class="blog-card__summary"><?php echo htmlspecialchars($postSummary, ENT_QUOTES, 'UTF-8'); ?></p>
-                      <div class="blog-meta">
-                        <span><i class="bi bi-person-circle"></i><?php echo htmlspecialchars($postAuthor, ENT_QUOTES, 'UTF-8'); ?></span>
-                        <span><i class="bi bi-calendar3"></i><?php echo htmlspecialchars($postDate, ENT_QUOTES, 'UTF-8'); ?></span>
+
+            <?php if (empty($categoryPosts)): ?>
+              <div class="alert alert-light border-0 shadow-sm" role="status">
+                Fresh stories for <?php echo htmlspecialchars(strtolower($categoryTitle), ENT_QUOTES, 'UTF-8'); ?> are on the way. Check back soon!
+              </div>
+            <?php else: ?>
+              <div class="row g-4">
+                <?php foreach ($categoryPosts as $post): ?>
+                  <?php
+                    $postId = (int) ($post['id'] ?? 0);
+                    $postTitle = decodeBlogText($post['title'] ?? '');
+                    $postAuthor = decodeBlogText($post['author'] ?? 'LevelMinds Team');
+                    $postDate = formatBlogDate($post['created_at'] ?? '');
+                    $postSummary = blogExcerpt($post, 160);
+                    $postReadTime = blogReadTime($post);
+                    $postViews = (int) ($post['views'] ?? 0);
+                    $postLikes = (int) ($post['likes'] ?? 0);
+                    $shareUrl = sprintf('%s/blog_single.php?id=%d', $baseShareUrl, $postId);
+                  ?>
+                  <div class="col-sm-6 col-lg-4 col-xl-3">
+                    <article class="blog-card h-100 d-flex flex-column">
+                      <div class="blog-card__media">
+                        <img src="<?php echo htmlspecialchars(blogMediaUrl($post), ENT_QUOTES, 'UTF-8'); ?>" alt="<?php echo htmlspecialchars($postTitle, ENT_QUOTES, 'UTF-8'); ?>">
                       </div>
-                      <div class="blog-card__footer">
-                        <div class="blog-card__stats">
-                          <span><i class="bi bi-eye"></i><?php echo number_format($postViews); ?></span>
-                          <span><i class="bi bi-heart"></i><span class="like-count"><?php echo number_format($postLikes); ?></span></span>
+                      <div class="blog-card__body d-flex flex-column flex-grow-1">
+                        <span class="badge bg-primary-subtle text-primary mb-2">For <?php echo htmlspecialchars($categoryTitle, ENT_QUOTES, 'UTF-8'); ?></span>
+                        <h3 class="blog-card__title"><?php echo htmlspecialchars($postTitle, ENT_QUOTES, 'UTF-8'); ?></h3>
+                        <?php if ($postSummary !== ''): ?>
+                          <p class="blog-card__summary"><?php echo htmlspecialchars($postSummary, ENT_QUOTES, 'UTF-8'); ?></p>
+                        <?php endif; ?>
+                        <div class="blog-card__meta mt-auto">
+                          <span><i class="bi bi-person-circle"></i><?php echo htmlspecialchars($postAuthor, ENT_QUOTES, 'UTF-8'); ?></span>
+                          <span><i class="bi bi-calendar3"></i><?php echo htmlspecialchars($postDate, ENT_QUOTES, 'UTF-8'); ?></span>
+                          <?php if ($postReadTime !== ''): ?>
+                            <span><i class="bi bi-clock-history"></i><?php echo htmlspecialchars($postReadTime, ENT_QUOTES, 'UTF-8'); ?></span>
+                          <?php endif; ?>
                         </div>
-                        <div class="blog-card__actions">
-                          <button class="btn btn-link p-0 js-read-story" type="button"
-                                  data-post-id="<?php echo $postId; ?>"
-                                  data-title="<?php echo htmlspecialchars($postTitle, ENT_QUOTES, 'UTF-8'); ?>"
-                                  data-author="<?php echo htmlspecialchars($postAuthor, ENT_QUOTES, 'UTF-8'); ?>"
-                                  data-date="<?php echo htmlspecialchars($postDate, ENT_QUOTES, 'UTF-8'); ?>"
-                                  data-content="<?php echo htmlspecialchars($postContent, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
-                            Read Full Story
+                        <div class="blog-card__footer">
+                          <div class="blog-card__stats">
+                            <span><i class="bi bi-eye"></i><span class="js-view-count" data-post-id="<?php echo $postId; ?>"><?php echo number_format($postViews); ?></span></span>
+                            <span><i class="bi bi-heart"></i><span class="js-like-count" data-post-id="<?php echo $postId; ?>"><?php echo number_format($postLikes); ?></span></span>
+                          </div>
+                          <button
+                            class="btn btn-read-more js-read-more"
+                            type="button"
+                            data-post-id="<?php echo $postId; ?>"
+                            data-title="<?php echo htmlspecialchars($postTitle, ENT_QUOTES, 'UTF-8'); ?>"
+                            data-author="<?php echo htmlspecialchars($postAuthor, ENT_QUOTES, 'UTF-8'); ?>"
+                            data-date="<?php echo htmlspecialchars($postDate, ENT_QUOTES, 'UTF-8'); ?>"
+                            data-read-time="<?php echo htmlspecialchars($postReadTime, ENT_QUOTES, 'UTF-8'); ?>"
+                            data-category="<?php echo htmlspecialchars($categoryTitle, ENT_QUOTES, 'UTF-8'); ?>"
+                            data-share-url="<?php echo htmlspecialchars($shareUrl, ENT_QUOTES, 'UTF-8'); ?>"
+                          >Read More</button>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2 mt-3">
+                          <button class="blog-action js-like" type="button" data-post-id="<?php echo $postId; ?>">
+                            <i class="bi bi-heart"></i>
+                            <span class="js-like-label">Like</span>
+                            <span class="js-like-count" data-post-id="<?php echo $postId; ?>"><?php echo number_format($postLikes); ?></span>
+                          </button>
+                          <button class="blog-action js-share" type="button" data-share-title="<?php echo htmlspecialchars($postTitle, ENT_QUOTES, 'UTF-8'); ?>" data-share-text="<?php echo htmlspecialchars($postSummary !== '' ? $postSummary : $postTitle, ENT_QUOTES, 'UTF-8'); ?>" data-share-url="<?php echo htmlspecialchars($shareUrl, ENT_QUOTES, 'UTF-8'); ?>">
+                            <i class="bi bi-share"></i>
+                            Share
                           </button>
                         </div>
                       </div>
-                      <div class="d-flex flex-wrap gap-2 mt-3">
-                        <button class="btn blog-like-btn" type="button"
-                                data-post-id="<?php echo $postId; ?>"
-                                data-likes="<?php echo $postLikes; ?>">
-                          <i class="bi bi-heart"></i>
-                          <span class="blog-like-btn__label">Like</span>
-                          <span class="blog-like-btn__count"><?php echo number_format($postLikes); ?></span>
-                        </button>
-                        <button class="btn blog-share-btn" type="button"
-                                data-share-title="<?php echo htmlspecialchars($postTitle, ENT_QUOTES, 'UTF-8'); ?>"
-                                data-share-text="<?php echo htmlspecialchars($postSummary, ENT_QUOTES, 'UTF-8'); ?>"
-                                data-share-url="<?php echo htmlspecialchars($shareUrl, ENT_QUOTES, 'UTF-8'); ?>">
-                          <i class="bi bi-share"></i>
-                          Share
-                        </button>
-                      </div>
-                    </div>
-                  </article>
-                </div>
-              <?php endforeach; ?>
-            <?php endforeach; ?>
+                    </article>
+                  </div>
+                <?php endforeach; ?>
+              </div>
+            <?php endif; ?>
           </div>
-        <?php endif; ?>
+        <?php endforeach; ?>
       </div>
     </section>
   </main>
 
   <?php include 'footer.html'; ?>
 
-  <div class="modal fade" id="storyModal" tabindex="-1" aria-labelledby="storyModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-xl">
+  <div class="modal fade" id="blogModal" tabindex="-1" aria-labelledby="blogModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable modal-dialog-centered">
       <div class="modal-content">
-        <div class="modal-header">
+        <div class="modal-header border-0 pb-0">
           <div>
-            <h5 class="modal-title" id="storyModalLabel"></h5>
-            <p class="modal-subtitle mb-0"></p>
+            <span class="badge rounded-pill bg-primary-subtle text-primary-emphasis mb-2 js-modal-category d-none"></span>
+            <h2 class="modal-title h4 mb-0 js-modal-title" id="blogModalLabel"></h2>
+            <p class="text-muted small mb-0 js-modal-meta d-none"></p>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
-        <div class="modal-body"></div>
-        <div class="modal-footer">
+        <div class="modal-body pt-0">
+          <div class="js-modal-body"></div>
+        </div>
+        <div class="modal-footer flex-column flex-lg-row align-items-lg-center gap-3 border-0 pt-0 pb-4 px-lg-4">
+          <div class="d-flex flex-wrap gap-2">
+            <button class="blog-action js-like js-modal-like" type="button" data-post-id="0" aria-pressed="false">
+              <i class="bi bi-heart"></i>
+              <span class="js-like-label">Like</span>
+              <span class="js-like-count" data-post-id="0">0</span>
+            </button>
+            <button class="blog-action js-share js-modal-share" type="button" data-share-title="" data-share-text="" data-share-url="">
+              <i class="bi bi-share"></i>
+              Share
+            </button>
+          </div>
+          <div class="ms-lg-auto">
+            <span class="blog-action disabled d-inline-flex align-items-center gap-2 js-modal-views" style="background: rgba(31,106,225,0.05); border-color: transparent;">
+              <i class="bi bi-eye"></i>
+              <span class="js-view-count js-modal-view-count" data-post-id="0">0</span>
+              <span class="text-muted">views</span>
+            </span>
+          </div>
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
@@ -425,126 +643,366 @@ $categoryFilters = array_unique(array_merge(['all'], $preferredOrder, array_diff
   </div>
 
   <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1080;">
-    <div id="shareToast" class="toast" role="status" aria-live="polite" aria-atomic="true">
-      <div class="toast-body"></div>
+    <div id="shareToast" class="toast align-items-center" role="status" aria-live="polite" aria-atomic="true">
+      <div class="d-flex">
+        <div class="toast-body"></div>
+        <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
     </div>
   </div>
 
   <script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
+  <script src="assets/js/footer.js"></script>
   <script>
     (function () {
-      const visitorStorageKey = 'lm_visitor_token';
+      const visitorTokenKey = 'lm_visitor_token';
       const likedPostsKey = 'lm_liked_posts';
+      const storageTestKey = 'lm_storage_test';
 
-      function decodeEntities(encodedString) {
-        const textarea = document.createElement('textarea');
-        textarea.innerHTML = encodedString;
-        return textarea.value;
+      const modalElement = document.getElementById('blogModal');
+      const modalBody = modalElement ? modalElement.querySelector('.js-modal-body') : null;
+      const modalTitle = modalElement ? modalElement.querySelector('.js-modal-title') : null;
+      const modalCategory = modalElement ? modalElement.querySelector('.js-modal-category') : null;
+      const modalMeta = modalElement ? modalElement.querySelector('.js-modal-meta') : null;
+      const modalLikeButton = modalElement ? modalElement.querySelector('.js-modal-like') : null;
+      const modalLikeCount = modalElement ? modalElement.querySelector('.js-modal-like .js-like-count') : null;
+      const modalShareButton = modalElement ? modalElement.querySelector('.js-modal-share') : null;
+      const modalViewCount = modalElement ? modalElement.querySelector('.js-modal-view-count') : null;
+
+      const storageAvailable = (() => {
+        try {
+          localStorage.setItem(storageTestKey, '1');
+          localStorage.removeItem(storageTestKey);
+          return true;
+        } catch (error) {
+          console.warn('Local storage is not available; falling back to in-memory session.', error);
+          return false;
+        }
+      })();
+
+      let memoryVisitorToken = null;
+      let memoryLikedPosts = new Set();
+      let likedPosts = new Set();
+
+      function generateVisitorToken() {
+        const random = window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).slice(2);
+        return `lm_${random}`;
       }
 
       function ensureVisitorToken() {
-        let token = localStorage.getItem(visitorStorageKey);
-
-        if (!token) {
-          token = 'lm_' + (window.crypto?.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).slice(2));
-          localStorage.setItem(visitorStorageKey, token);
+        if (storageAvailable) {
+          try {
+            let token = localStorage.getItem(visitorTokenKey);
+            if (!token) {
+              token = generateVisitorToken();
+              localStorage.setItem(visitorTokenKey, token);
+            }
+            return token;
+          } catch (error) {
+            console.warn('Unable to access localStorage for visitor token, falling back to memory.', error);
+          }
         }
 
-        return token;
+        if (!memoryVisitorToken) {
+          memoryVisitorToken = generateVisitorToken();
+        }
+
+        return memoryVisitorToken;
       }
 
       function getLikedPosts() {
-        try {
-          const raw = localStorage.getItem(likedPostsKey);
-          if (!raw) {
-            return [];
+        if (storageAvailable) {
+          try {
+            const raw = localStorage.getItem(likedPostsKey);
+            if (!raw) {
+              return new Set();
+            }
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              return new Set(parsed.map(Number));
+            }
+          } catch (error) {
+            console.warn('Unable to read liked posts from storage; falling back to in-memory cache.', error);
           }
-          const parsed = JSON.parse(raw);
-          return Array.isArray(parsed) ? parsed : [];
-        } catch (error) {
-          console.error('Unable to read liked posts from storage', error);
-          return [];
+        }
+
+        return new Set(memoryLikedPosts);
+      }
+
+      function setLikedPosts(set) {
+        memoryLikedPosts = new Set(set);
+
+        if (storageAvailable) {
+          try {
+            localStorage.setItem(likedPostsKey, JSON.stringify(Array.from(set)));
+          } catch (error) {
+            console.warn('Unable to persist liked posts to storage.', error);
+          }
         }
       }
 
-      function setLikedPosts(ids) {
+      function formatNumber(value) {
         try {
-          localStorage.setItem(likedPostsKey, JSON.stringify(ids));
+          return new Intl.NumberFormat().format(value);
         } catch (error) {
-          console.error('Unable to persist liked posts', error);
+          return String(value);
         }
       }
 
-      function markLikedButtons() {
-        const likedIds = new Set(getLikedPosts());
-        document.querySelectorAll('.blog-like-btn').forEach((button) => {
-          const postId = button.dataset.postId;
-          if (!postId) {
-            return;
-          }
-          if (likedIds.has(Number(postId))) {
-            button.classList.add('is-liked');
-            button.setAttribute('aria-pressed', 'true');
-          } else {
-            button.classList.remove('is-liked');
-            button.setAttribute('aria-pressed', 'false');
+      function parseNumberFromText(value) {
+        const digits = String(value || '').replace(/[^0-9]/g, '');
+        return digits ? Number(digits) : 0;
+      }
+
+      function getCurrentLikeCount(postId) {
+        const node = document.querySelector(`.js-like-count[data-post-id="${postId}"]`);
+        return node ? parseNumberFromText(node.textContent) : 0;
+      }
+
+      function updateLikeState(postId, liked, likeCount) {
+        document.querySelectorAll(`.js-like-count[data-post-id="${postId}"]`).forEach((node) => {
+          node.textContent = formatNumber(likeCount);
+        });
+
+        document.querySelectorAll(`.js-like[data-post-id="${postId}"]`).forEach((button) => {
+          button.classList.toggle('is-liked', liked);
+          button.setAttribute('aria-pressed', liked ? 'true' : 'false');
+          const label = button.querySelector('.js-like-label');
+          if (label) {
+            label.textContent = liked ? 'Liked' : 'Like';
           }
         });
       }
 
-      function handleFilterClick(event) {
-        const button = event.currentTarget;
-        const filter = button.dataset.filter;
-        if (!filter) {
+      function updateViewCount(postId, newCount) {
+        document.querySelectorAll(`.js-view-count[data-post-id="${postId}"]`).forEach((node) => {
+          node.textContent = formatNumber(newCount);
+        });
+      }
+
+      async function incrementViews(postId) {
+        try {
+          const response = await fetch('api/update_views.php', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ post_id: postId }),
+          });
+
+          if (!response.ok) {
+            throw new Error('Failed to update views');
+          }
+
+          const result = await response.json();
+          if (result && typeof result.views === 'number') {
+            updateViewCount(postId, result.views);
+            return result.views;
+          }
+        } catch (error) {
+          console.error(error);
+        }
+
+        return null;
+      }
+
+      function buildMeta(author, date, readTime) {
+        return [author, date, readTime].filter(Boolean).join(' • ');
+      }
+
+      function setModalLoading() {
+        if (!modalElement) {
           return;
         }
 
-        document.querySelectorAll('.btn-filter').forEach((btn) => btn.classList.remove('active'));
-        button.classList.add('active');
+        if (modalTitle) {
+          modalTitle.textContent = 'Loading story…';
+        }
 
-        const cards = document.querySelectorAll('#blogCards [data-category]');
-        cards.forEach((card) => {
-          if (filter === 'all' || card.dataset.category === filter) {
-            card.classList.remove('d-none');
-          } else {
-            card.classList.add('d-none');
+        if (modalCategory) {
+          modalCategory.classList.add('d-none');
+        }
+
+        if (modalMeta) {
+          modalMeta.classList.add('d-none');
+          modalMeta.textContent = '';
+        }
+
+        if (modalBody) {
+          modalBody.innerHTML = '<div class="py-5 text-center text-muted">Fetching the full story…</div>';
+        }
+
+        if (modalLikeButton) {
+          modalLikeButton.dataset.postId = '0';
+          modalLikeButton.classList.remove('is-liked');
+          modalLikeButton.setAttribute('aria-pressed', 'false');
+        }
+
+        if (modalLikeCount) {
+          modalLikeCount.dataset.postId = '0';
+          modalLikeCount.textContent = '0';
+        }
+
+        if (modalShareButton) {
+          modalShareButton.dataset.shareTitle = '';
+          modalShareButton.dataset.shareText = '';
+          modalShareButton.dataset.shareUrl = '';
+        }
+
+        if (modalViewCount) {
+          modalViewCount.dataset.postId = '0';
+          modalViewCount.textContent = '0';
+        }
+      }
+
+      function setModalError(message) {
+        if (!modalElement) {
+          return;
+        }
+
+        if (modalTitle) {
+          modalTitle.textContent = 'Blog unavailable';
+        }
+
+        if (modalCategory) {
+          modalCategory.classList.add('d-none');
+        }
+
+        if (modalMeta) {
+          modalMeta.classList.add('d-none');
+          modalMeta.textContent = '';
+        }
+
+        if (modalBody) {
+          modalBody.innerHTML = `<div class="py-5 text-center text-muted">${message}</div>`;
+        }
+
+        if (modalLikeButton) {
+          modalLikeButton.dataset.postId = '0';
+          modalLikeButton.classList.remove('is-liked');
+          modalLikeButton.setAttribute('aria-pressed', 'false');
+        }
+
+        if (modalLikeCount) {
+          modalLikeCount.dataset.postId = '0';
+          modalLikeCount.textContent = '0';
+        }
+
+        if (modalShareButton) {
+          modalShareButton.dataset.shareTitle = '';
+          modalShareButton.dataset.shareText = '';
+          modalShareButton.dataset.shareUrl = '';
+        }
+
+        if (modalViewCount) {
+          modalViewCount.dataset.postId = '0';
+          modalViewCount.textContent = '0';
+        }
+      }
+
+      function applyModalData(data) {
+        if (!modalElement) {
+          return;
+        }
+
+        if (modalTitle) {
+          modalTitle.textContent = data.title || '';
+        }
+
+        if (modalCategory) {
+          const hasCategory = Boolean(data.category);
+          modalCategory.textContent = hasCategory ? data.category : '';
+          modalCategory.classList.toggle('d-none', !hasCategory);
+        }
+
+        if (modalMeta) {
+          const metaText = buildMeta(data.author, data.date, data.read_time);
+          modalMeta.textContent = metaText;
+          modalMeta.classList.toggle('d-none', metaText === '');
+        }
+
+        if (modalBody) {
+          modalBody.innerHTML = data.content || '<p class="mb-0">Full story coming soon.</p>';
+        }
+
+        if (modalLikeButton) {
+          modalLikeButton.dataset.postId = String(data.id);
+          const isLiked = likedPosts.has(data.id);
+          modalLikeButton.classList.toggle('is-liked', isLiked);
+          modalLikeButton.setAttribute('aria-pressed', isLiked ? 'true' : 'false');
+          const label = modalLikeButton.querySelector('.js-like-label');
+          if (label) {
+            label.textContent = isLiked ? 'Liked' : 'Like';
           }
+        }
+
+        if (modalLikeCount) {
+          modalLikeCount.dataset.postId = String(data.id);
+          modalLikeCount.textContent = formatNumber(data.likes || 0);
+        }
+
+        if (modalShareButton) {
+          modalShareButton.dataset.shareTitle = data.title || document.title;
+          modalShareButton.dataset.shareText = data.summary || data.title || '';
+          modalShareButton.dataset.shareUrl = data.share_url || window.location.href;
+        }
+
+        if (modalViewCount) {
+          modalViewCount.dataset.postId = String(data.id);
+          modalViewCount.textContent = formatNumber(data.views || 0);
+        }
+      }
+
+      async function fetchBlog(postId) {
+        const response = await fetch(`api/get_blog.php?id=${encodeURIComponent(postId)}`, {
+          headers: {
+            'Accept': 'application/json',
+          },
         });
+
+        if (!response.ok) {
+          throw new Error('Unable to load blog post');
+        }
+
+        const result = await response.json();
+
+        if (!result || result.success !== true) {
+          const message = result && result.error ? result.error : 'Unable to load blog post';
+          throw new Error(message);
+        }
+
+        return result;
       }
 
-      function handleStoryClick(event) {
-        const button = event.currentTarget;
-        const title = button.dataset.title || '';
-        const author = button.dataset.author || 'LevelMinds Team';
-        const date = button.dataset.date || '';
-        const content = decodeEntities(button.dataset.content || '');
+      async function openModalForPost(trigger) {
+        const postId = Number(trigger.dataset.postId);
+        if (!postId || !modalElement) {
+          return;
+        }
 
-        const modalEl = document.getElementById('storyModal');
-        const modalTitle = modalEl.querySelector('.modal-title');
-        const modalSubtitle = modalEl.querySelector('.modal-subtitle');
-        const modalBody = modalEl.querySelector('.modal-body');
+        const modalInstance = bootstrap.Modal.getOrCreateInstance(modalElement);
+        setModalLoading();
+        modalInstance.show();
 
-        modalTitle.textContent = title;
-        modalSubtitle.textContent = [author, date].filter(Boolean).join(' • ');
-        modalBody.innerHTML = content || '<p>No additional content available.</p>';
-
-        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
-        modal.show();
+        try {
+          const data = await fetchBlog(postId);
+          applyModalData(data);
+          updateViewCount(postId, typeof data.views === 'number' ? data.views : 0);
+          await incrementViews(postId);
+        } catch (error) {
+          console.error(error);
+          setModalError('This blog could not be loaded. It might have been removed or unpublished.');
+        }
       }
 
-      async function handleLikeClick(event) {
-        const button = event.currentTarget;
+      async function toggleLike(button) {
         const postId = Number(button.dataset.postId);
         if (!postId) {
           return;
         }
 
-        const storedLikedPosts = new Set(getLikedPosts());
-        const wasLiked = storedLikedPosts.has(postId);
-
         button.disabled = true;
-        const countEl = button.querySelector('.blog-like-btn__count');
-        const originalCount = Number(countEl?.textContent?.replace(/[^0-9]/g, '')) || 0;
+        const wasLiked = likedPosts.has(postId);
 
         try {
           const response = await fetch('api/like.php', {
@@ -559,112 +1017,133 @@ $categoryFilters = array_unique(array_merge(['all'], $preferredOrder, array_diff
           });
 
           if (!response.ok) {
-            throw new Error('Failed to toggle like');
+            throw new Error('Unable to toggle like');
           }
 
           const result = await response.json();
-          const updatedLikes = Number(result.likes);
+          const newLikeCount = Number(result.likes ?? 0);
           const isLiked = Boolean(result.liked);
 
-          if (!Number.isNaN(updatedLikes) && countEl) {
-            countEl.textContent = new Intl.NumberFormat().format(updatedLikes);
-          }
+          updateLikeState(postId, isLiked, newLikeCount);
 
-          const likedPosts = new Set(storedLikedPosts);
           if (isLiked) {
             likedPosts.add(postId);
-            button.classList.add('is-liked');
-            button.setAttribute('aria-pressed', 'true');
           } else {
             likedPosts.delete(postId);
-            button.classList.remove('is-liked');
-            button.setAttribute('aria-pressed', 'false');
           }
 
-          setLikedPosts(Array.from(likedPosts));
+          setLikedPosts(likedPosts);
         } catch (error) {
           console.error(error);
-          if (countEl) {
-            countEl.textContent = new Intl.NumberFormat().format(originalCount);
-          }
-          if (wasLiked) {
-            button.classList.add('is-liked');
-            button.setAttribute('aria-pressed', 'true');
-          } else {
-            button.classList.remove('is-liked');
-            button.setAttribute('aria-pressed', 'false');
-          }
-          setLikedPosts(Array.from(storedLikedPosts));
+          updateLikeState(postId, wasLiked, getCurrentLikeCount(postId));
         } finally {
           button.disabled = false;
         }
       }
 
-      async function handleShareClick(event) {
+      function initialiseLikes() {
+        likedPosts = getLikedPosts();
+
+        document.querySelectorAll('.js-like').forEach((button) => {
+          const postId = Number(button.dataset.postId);
+
+          if (postId && likedPosts.has(postId)) {
+            button.classList.add('is-liked');
+            button.setAttribute('aria-pressed', 'true');
+            const label = button.querySelector('.js-like-label');
+            if (label) {
+              label.textContent = 'Liked';
+            }
+          } else {
+            button.setAttribute('aria-pressed', 'false');
+          }
+
+          button.addEventListener('click', () => toggleLike(button));
+        });
+      }
+
+      function handleReadMore(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        const trigger = event.currentTarget;
+        openModalForPost(trigger);
+      }
+
+      async function handleShare(event) {
         const button = event.currentTarget;
         const shareData = {
           title: button.dataset.shareTitle || document.title,
-          text: button.dataset.shareText || 'Check out this story from LevelMinds',
+          text: button.dataset.shareText || 'Check out this blog from LevelMinds',
           url: button.dataset.shareUrl || window.location.href,
         };
 
         const toastEl = document.getElementById('shareToast');
-        const toastBody = toastEl?.querySelector('.toast-body');
+        const toastBody = toastEl ? toastEl.querySelector('.toast-body') : null;
 
         if (navigator.share) {
           try {
             await navigator.share(shareData);
-            if (toastBody) {
-              toastBody.textContent = 'Story shared successfully!';
+            if (toastEl && toastBody) {
+              toastBody.textContent = 'Thanks for sharing this story!';
               bootstrap.Toast.getOrCreateInstance(toastEl).show();
             }
             return;
           } catch (error) {
-            if (error.name !== 'AbortError') {
-              console.error('Share failed, trying clipboard fallback', error);
-            } else {
+            if (error.name === 'AbortError') {
               return;
             }
+            console.error('Share failed, falling back to clipboard', error);
           }
         }
 
-        try {
-          await navigator.clipboard.writeText(shareData.url);
-          if (toastBody) {
-            toastBody.textContent = 'Link copied to clipboard!';
-            bootstrap.Toast.getOrCreateInstance(toastEl).show();
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          try {
+            await navigator.clipboard.writeText(shareData.url);
+            if (toastEl && toastBody) {
+              toastBody.textContent = 'Link copied to clipboard!';
+              bootstrap.Toast.getOrCreateInstance(toastEl).show();
+            }
+            return;
+          } catch (error) {
+            console.error('Clipboard fallback failed', error);
           }
-        } catch (error) {
-          console.error('Clipboard fallback failed', error);
-          if (toastBody) {
-            toastBody.textContent = 'Unable to share automatically. Please copy the URL from your browser.';
-            bootstrap.Toast.getOrCreateInstance(toastEl).show();
-          }
+        }
+
+        if (toastEl && toastBody) {
+          toastBody.textContent = 'Copy this link manually: ' + shareData.url;
+          bootstrap.Toast.getOrCreateInstance(toastEl).show();
         }
       }
 
-      function init() {
+      function initialiseReads() {
+        document.querySelectorAll('.js-read-more').forEach((trigger) => {
+          trigger.addEventListener('click', handleReadMore);
+        });
+      }
+
+      function initialiseShares() {
+        document.querySelectorAll('.js-share').forEach((button) => {
+          button.addEventListener('click', handleShare);
+        });
+      }
+
+      document.addEventListener('DOMContentLoaded', () => {
         ensureVisitorToken();
-        markLikedButtons();
+        initialiseLikes();
+        initialiseReads();
+        initialiseShares();
 
-        document.querySelectorAll('.btn-filter').forEach((button) => {
-          button.addEventListener('click', handleFilterClick);
+        document.querySelectorAll('.fbs__net-navbar .nav-link').forEach((link) => {
+          const href = (link.getAttribute('href') || '').toLowerCase();
+          if (href.includes('blogs.php')) {
+            link.classList.add('active');
+            link.setAttribute('aria-current', 'page');
+          } else {
+            link.classList.remove('active');
+            link.removeAttribute('aria-current');
+          }
         });
-
-        document.querySelectorAll('.js-read-story').forEach((button) => {
-          button.addEventListener('click', handleStoryClick);
-        });
-
-        document.querySelectorAll('.blog-like-btn').forEach((button) => {
-          button.addEventListener('click', handleLikeClick);
-        });
-
-        document.querySelectorAll('.blog-share-btn').forEach((button) => {
-          button.addEventListener('click', handleShareClick);
-        });
-      }
-
-      document.addEventListener('DOMContentLoaded', init);
+      });
     })();
   </script>
 </body>
