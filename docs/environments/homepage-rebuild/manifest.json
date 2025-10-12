@@ -1,0 +1,18 @@
+{
+  "name": "Homepage Rebuild",
+  "slug": "homepage-rebuild",
+  "status": "initialized",
+  "created_at": "2024-05-10",
+  "owners": [
+    "Web Team"
+  ],
+  "summary": "Refresh the public marketing homepage with modernized layout, content hierarchy, and improved performance baselines.",
+  "entry_points": [
+    "index.html",
+    "assets/css/style.css"
+  ],
+  "documentation": [
+    "../environment-setup.md",
+    "notes.md"
+  ]
+}
