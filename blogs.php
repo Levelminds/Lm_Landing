@@ -621,7 +621,11 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
         return token;
       }
 
-      function getLikedPosts() {
+      return memoryVisitorToken;
+    }
+
+    function getLikedPosts() {
+      if (storageAvailable) {
         try {
           const stored = localStorage.getItem(likedPostsKey);
           if (!stored) {
@@ -645,6 +649,7 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
           return String(value);
         }
       }
+    }
 
       function formatNumber(value) {
         try {
@@ -653,6 +658,7 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
           return String(value);
         }
       }
+    }
 
       function parseNumberFromText(value) {
         const digits = String(value || '').replace(/[^0-9]/g, '');
@@ -688,6 +694,18 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
         document.querySelectorAll(`.js-view-count[data-post-id="${postId}"]`).forEach((node) => {
           node.textContent = new Intl.NumberFormat().format(newCount);
         });
+
+        if (!response.ok) {
+          throw new Error('Failed to update views');
+        }
+
+        const result = await response.json();
+        if (result && typeof result.views === 'number') {
+          updateViewCount(postId, result.views);
+          return result.views;
+        }
+      } catch (error) {
+        console.error(error);
       }
 
       async function incrementViews(postId) {
@@ -718,6 +736,12 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
         if (!postId) {
           return;
         }
+      }
+
+      if (modalLikeCount) {
+        modalLikeCount.dataset.postId = '0';
+        modalLikeCount.textContent = '0';
+      }
 
         button.disabled = true;
         const wasLiked = likedPosts.has(postId);
@@ -797,6 +821,45 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
 
         window.location.href = anchor.getAttribute('href');
       }
+    }
+
+    function initialiseLikes() {
+      likedPosts = getLikedPosts();
+
+      document.querySelectorAll('.js-like').forEach((button) => {
+        const postId = Number(button.dataset.postId);
+
+        if (postId && likedPosts.has(postId)) {
+          button.classList.add('is-liked');
+          button.setAttribute('aria-pressed', 'true');
+          const label = button.querySelector('.js-like-label');
+          if (label) {
+            label.textContent = 'Liked';
+          }
+        } else {
+          button.setAttribute('aria-pressed', 'false');
+        }
+
+        button.addEventListener('click', () => toggleLike(button));
+      });
+    }
+
+    function handleReadMore(event) {
+      const anchor = event.currentTarget;
+      event.preventDefault();
+      openModalForPost(anchor);
+    }
+
+    async function handleShare(event) {
+      const button = event.currentTarget;
+      const shareData = {
+        title: button.dataset.shareTitle || document.title,
+        text: button.dataset.shareText || 'Check out this blog from LevelMinds',
+        url: button.dataset.shareUrl || window.location.href,
+      };
+
+      const toastEl = document.getElementById('shareToast');
+      const toastBody = toastEl ? toastEl.querySelector('.toast-body') : null;
 
       async function handleShare(event) {
         const button = event.currentTarget;
@@ -823,7 +886,9 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
             }
             console.error('Share failed, falling back to clipboard', error);
           }
+          console.error('Share failed, falling back to clipboard', error);
         }
+      }
 
         if (navigator.clipboard && navigator.clipboard.writeText) {
           try {
