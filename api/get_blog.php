@@ -90,17 +90,6 @@ function fallbackContent(string $content, string $summary): string
     return '<p>Full story coming soon.</p>';
 }
 
-function blogMediaUrl(array $post): string
-{
-    $mediaUrl = trim((string) ($post['media_url'] ?? ''));
-
-    if ($mediaUrl !== '') {
-        return $mediaUrl;
-    }
-
-    return 'assets/images/img-1-min.jpg';
-}
-
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
@@ -111,9 +100,7 @@ try {
 
     $post = $statement->fetch(PDO::FETCH_ASSOC);
 
-    $status = strtolower(trim((string) ($post['status'] ?? '')));
-
-    if (!$post || ($status !== 'published' && $status !== 'approved')) {
+    if (!$post || ($post['status'] ?? '') !== 'published') {
         http_response_code(404);
         echo json_encode(['error' => 'Blog post not found']);
         exit;
@@ -129,7 +116,6 @@ try {
     $createdAt = $post['created_at'] ?? '';
 
     $fullContent = fallbackContent($content, $summary);
-    $imageUrl = blogMediaUrl($post);
 
     $readTime = calculateReadTime($content, $summary);
 
@@ -146,7 +132,6 @@ try {
         'category' => $category,
         'summary' => decodeBlogText($post['summary'] ?? ''),
         'content' => $fullContent,
-        'image' => $imageUrl,
         'views' => $views,
         'likes' => $likes,
         'read_time' => $readTime,
