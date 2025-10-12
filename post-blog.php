@@ -10,6 +10,148 @@ $dbname = 'u420143207_LM_landing';
 $username = 'u420143207_lmlanding';
 $password = 'Levelminds@2024';
 
+/**
+ * Resize an image to a maximum width while maintaining aspect ratio.
+ */
+function resizeImageToMaxWidth(string $path, int $maxWidth = 1600): void
+{
+    $info = @getimagesize($path);
+    if (!$info) {
+        return;
+    }
+
+    [$width, $height, $type] = $info;
+    if ($width <= $maxWidth) {
+        return;
+    }
+
+    $ratio = $height / $width;
+    $newWidth = $maxWidth;
+    $newHeight = (int) round($newWidth * $ratio);
+
+    switch ($type) {
+        case IMAGETYPE_JPEG:
+            $source = imagecreatefromjpeg($path);
+            $save = static function ($image, $destination) {
+                imagejpeg($image, $destination, 85);
+            };
+            break;
+        case IMAGETYPE_PNG:
+            $source = imagecreatefrompng($path);
+            $save = static function ($image, $destination) {
+                imagepng($image, $destination, 6);
+            };
+            break;
+        case IMAGETYPE_GIF:
+            $source = imagecreatefromgif($path);
+            $save = static function ($image, $destination) {
+                imagegif($image, $destination);
+            };
+            break;
+        case IMAGETYPE_WEBP:
+            if (!function_exists('imagecreatefromwebp')) {
+                return;
+            }
+            $source = imagecreatefromwebp($path);
+            $save = static function ($image, $destination) {
+                imagewebp($image, $destination, 80);
+            };
+            break;
+        default:
+            return;
+    }
+
+    if (!$source) {
+        return;
+    }
+
+    $resized = imagecreatetruecolor($newWidth, $newHeight);
+
+    if ($type === IMAGETYPE_PNG || $type === IMAGETYPE_GIF) {
+        imagecolortransparent($resized, imagecolorallocatealpha($resized, 0, 0, 0, 127));
+        imagealphablending($resized, false);
+        imagesavealpha($resized, true);
+    }
+
+    imagecopyresampled($resized, $source, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+    $save($resized, $path);
+
+    imagedestroy($source);
+    imagedestroy($resized);
+}
+
+function persistImageBinary(string $binary, string $extension, string $uploadDir, ?string &$error): ?string
+{
+    if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
+        $error = 'Unable to create upload directory.';
+        return null;
+    }
+
+    $filename = uniqid('blog_', true) . '.' . $extension;
+    $destination = $uploadDir . $filename;
+
+    if (file_put_contents($destination, $binary) === false) {
+        $error = 'Unable to save uploaded image.';
+        return null;
+    }
+
+    resizeImageToMaxWidth($destination);
+
+    return 'uploads/blogs/' . $filename;
+}
+
+function handleUploadedImage(array $file, array $allowedExtensions, string $uploadDir, ?string &$error): ?string
+{
+    if ($file['error'] !== UPLOAD_ERR_OK) {
+        $error = 'Unable to upload image. Please try again.';
+        return null;
+    }
+
+    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    $ext = $ext === 'jpeg' ? 'jpg' : $ext;
+
+    if (!in_array($ext, $allowedExtensions, true)) {
+        $error = 'Please upload a JPG, PNG, GIF, or WEBP image.';
+        return null;
+    }
+
+    $binary = file_get_contents($file['tmp_name']);
+    if ($binary === false) {
+        $error = 'Unable to read uploaded image.';
+        return null;
+    }
+
+    return persistImageBinary($binary, $ext, $uploadDir, $error);
+}
+
+function handleCroppedImage(?string $dataUrl, array $allowedExtensions, string $uploadDir, ?string &$error): ?string
+{
+    if (!$dataUrl) {
+        return null;
+    }
+
+    if (!preg_match('/^data:image\/(\w+);base64,/', $dataUrl, $matches)) {
+        $error = 'Invalid cropped image data provided.';
+        return null;
+    }
+
+    $ext = strtolower($matches[1]);
+    $ext = $ext === 'jpeg' ? 'jpg' : $ext;
+
+    if (!in_array($ext, $allowedExtensions, true)) {
+        $error = 'Unsupported cropped image format.';
+        return null;
+    }
+
+    $binary = base64_decode(substr($dataUrl, strpos($dataUrl, ',') + 1), true);
+    if ($binary === false) {
+        $error = 'Failed to decode cropped image.';
+        return null;
+    }
+
+    return persistImageBinary($binary, $ext, $uploadDir, $error);
+}
+
 $message = null;
 $error = null;
 
@@ -27,22 +169,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($title === '' || $summary === '' || $content === '') {
         $error = 'Please fill in the required fields (title, summary, and content).';
     } else {
-        if ($mediaType === 'photo' && isset($_FILES['media_file']) && $_FILES['media_file']['error'] === UPLOAD_ERR_OK) {
-            $allowed = ['jpg','jpeg','png','gif','webp'];
-            $ext = strtolower(pathinfo($_FILES['media_file']['name'], PATHINFO_EXTENSION));
-            if (!in_array($ext, $allowed, true)) {
-                $error = 'Please upload a JPG, PNG, GIF, or WEBP image.';
-            } else {
-                $uploadDir = __DIR__ . '/uploads/blogs/';
-                if (!is_dir($uploadDir)) {
-                    mkdir($uploadDir, 0755, true);
-                }
-                $filename = uniqid('blog_', true) . '.' . $ext;
-                $destination = $uploadDir . $filename;
-                if (move_uploaded_file($_FILES['media_file']['tmp_name'], $destination)) {
-                    $mediaUrl = 'uploads/blogs/' . $filename;
-                } else {
-                    $error = 'Unable to upload image. Please try again.';
+        $allowed = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+        $uploadDir = __DIR__ . '/uploads/blogs/';
+
+        if ($mediaType === 'photo') {
+            $mediaFromCrop = handleCroppedImage($_POST['cropped_image'] ?? null, $allowed, $uploadDir, $error);
+            if ($mediaFromCrop) {
+                $mediaUrl = $mediaFromCrop;
+            } elseif (!$error && isset($_FILES['media_file']) && $_FILES['media_file']['tmp_name']) {
+                $mediaFromUpload = handleUploadedImage($_FILES['media_file'], $allowed, $uploadDir, $error);
+                if ($mediaFromUpload) {
+                    $mediaUrl = $mediaFromUpload;
                 }
             }
         }
@@ -86,6 +223,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <link rel="icon" href="assets/images/logo/logo.svg" type="image/svg+xml">
   <link href="assets/vendors/bootstrap/bootstrap.min.css" rel="stylesheet">
   <link href="assets/vendors/bootstrap-icons/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" rel="stylesheet" integrity="sha512-6H4Cp8eHZBPqY8XBr2J1xBd+4WNP52ZiAQDA2RjqqWvAvLOewJIHk0n3SM8IcbkNsSn+C/edyy6fEtBmRa92Og==" crossorigin="anonymous" referrerpolicy="no-referrer" />
   <style>
     body { background-color: #f5f7fb; font-family: 'Public Sans', sans-serif; }
     .admin-shell { max-width: 960px; margin: 0 auto; padding: 32px 16px 96px; }
@@ -141,15 +279,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Upload image (optional for photo blogs)</label>
-          <input type="file" name="media_file" class="form-control" accept="image/*">
+          <input type="file" name="media_file" class="form-control" accept="image/*" id="mediaFileInput">
+          <input type="hidden" name="cropped_image" id="croppedImageInput">
+          <div class="mt-3">
+            <img id="mediaPreview" src="" alt="Preview" class="img-fluid rounded d-none" style="max-height: 240px; object-fit: cover;">
+          </div>
+          <small class="text-muted d-block mt-2">Select an image to crop before upload. The image will be resized on the server to a maximum width of 1600px.</small>
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Short Summary *</label>
-          <textarea name="summary" class="form-control" rows="2" required></textarea>
+          <textarea name="summary" class="form-control rich-text" rows="2" required></textarea>
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Main Content *</label>
-          <textarea name="content" class="form-control" rows="8" required></textarea>
+          <textarea name="content" class="form-control rich-text" rows="8" required></textarea>
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Initial Views</label>
@@ -172,7 +315,130 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   <div data-global-footer></div>
   <script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
+  <div class="modal fade" id="cropperModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Crop image</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="ratio ratio-16x9 bg-light border rounded">
+            <img id="cropperImage" src="" alt="Crop preview" style="max-width: 100%; display: block;">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="cropperSaveBtn">Crop &amp; Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="https://cdn.tiny.cloud/1/8n6fw6tstamnd3rc1e3gaye4n5f53gfatj9klefklbm7scjm/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js" integrity="sha512-t1fUFAmHd7CrFuw+ECopQQ8C1INR+9HXv+x7Z/UBAV/KyeN6uZu76guf4Hx8bgvSFKPS/JU7+i5t9EYI2MQESA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="assets/js/footer.js"></script>
+  <script>
+    tinymce.init({
+      selector: 'textarea.rich-text',
+      plugins: 'advlist autolink lists link image charmap preview anchor searchreplace visualblocks code fullscreen insertdatetime media table help wordcount',
+      toolbar: 'undo redo | blocks | bold italic underline | alignleft aligncenter alignright alignjustify | bullist numlist outdent indent | link image media | removeformat | code fullscreen',
+      menubar: false,
+      branding: false,
+      height: 400,
+      convert_urls: false,
+      browser_spellcheck: true,
+      content_style: 'body { font-family: "Public Sans", sans-serif; font-size: 16px; }'
+    });
+
+    (function () {
+      const fileInput = document.getElementById('mediaFileInput');
+      const preview = document.getElementById('mediaPreview');
+      const croppedInput = document.getElementById('croppedImageInput');
+      const modalElement = document.getElementById('cropperModal');
+      if (!fileInput || !modalElement) {
+        return;
+      }
+
+      const modal = new bootstrap.Modal(modalElement);
+      const cropImage = document.getElementById('cropperImage');
+      const saveBtn = document.getElementById('cropperSaveBtn');
+      let cropperInstance = null;
+      let pendingFileType = '';
+
+      const resetCropper = () => {
+        if (cropperInstance) {
+          cropperInstance.destroy();
+          cropperInstance = null;
+        }
+        cropImage.src = '';
+        pendingFileType = '';
+      };
+
+      modalElement.addEventListener('hidden.bs.modal', resetCropper);
+
+      fileInput.addEventListener('change', function () {
+        const [file] = this.files;
+        croppedInput.value = '';
+        if (!file) {
+          return;
+        }
+
+        if (!file.type.startsWith('image/')) {
+          alert('Please choose an image file for cropping.');
+          fileInput.value = '';
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = function (event) {
+          cropImage.src = event.target.result;
+          pendingFileType = file.type;
+          modal.show();
+          setTimeout(() => {
+            cropperInstance = new Cropper(cropImage, {
+              viewMode: 1,
+              autoCropArea: 1,
+              responsive: true,
+              background: false
+            });
+          }, 150);
+        };
+        reader.readAsDataURL(file);
+      });
+
+      saveBtn.addEventListener('click', function () {
+        if (!cropperInstance) {
+          return;
+        }
+
+        const canvas = cropperInstance.getCroppedCanvas({
+          maxWidth: 1600,
+          imageSmoothingEnabled: true,
+          imageSmoothingQuality: 'high'
+        });
+
+        if (!canvas) {
+          alert('Unable to generate a cropped image. Please try again.');
+          return;
+        }
+
+        canvas.toBlob(function (blob) {
+          if (!blob) {
+            return;
+          }
+          const reader = new FileReader();
+          reader.onloadend = function () {
+            croppedInput.value = reader.result;
+            preview.src = reader.result;
+            preview.classList.remove('d-none');
+            fileInput.value = '';
+            modal.hide();
+          };
+          reader.readAsDataURL(blob);
+        }, pendingFileType || 'image/png');
+      });
+    })();
+  </script>
 </body>
 </html>
 

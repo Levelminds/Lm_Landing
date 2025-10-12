@@ -2,6 +2,8 @@
 
 A modern platform connecting skilled technicians with business opportunities and vendors with job opportunities for their technician teams.
 
+> **Workspace rebuild update:** This branch refreshes the local environment setup notes to ensure contributors can reliably recreate the project workspace from the repository contents.
+
 ## 🚀 Quick Start (Pre-configured for Hostinger)
 
 **All files are ready to deploy! Just:**
@@ -256,3 +258,15 @@ If you encounter issues:
 - **Phone**: +1 (800) TECHVREACH
 - **Address**: 🇺🇸 3380 Country Village Road, Riverside, CA 92509 #5312, United States
 - **Company**: TechvReach
+
+## Developer Utilities
+
+### Reset workspace cache
+
+If you need to clear cached artifacts while working locally, run:
+
+```bash
+php scripts/reset_workspace_cache.php
+```
+
+The helper script removes files inside common cache directories (if they exist) and rewrites `data/blogs.json` to an empty array so subsequent requests start from a clean state.
