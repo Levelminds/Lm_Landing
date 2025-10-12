@@ -609,6 +609,7 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
     (function () {
       const visitorTokenKey = 'lm_visitor_token';
       const likedPostsKey = 'lm_liked_posts';
+      const storageTestKey = 'lm_storage_test';
 
       function ensureVisitorToken() {
         let token = localStorage.getItem(visitorTokenKey);
@@ -641,7 +642,7 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
         try {
           localStorage.setItem(likedPostsKey, JSON.stringify(Array.from(set)));
         } catch (error) {
-          console.error('Unable to persist liked posts', error);
+          return String(value);
         }
       }
 
