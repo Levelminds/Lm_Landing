@@ -6,6 +6,8 @@ A modern platform connecting skilled technicians with business opportunities and
 
 ## 🚀 Quick Start (Pre-configured for Hostinger)
 
+Looking to work locally instead? Follow the rebuilt instructions in [`docs/environment-setup.md`](docs/environment-setup.md) for prerequisites, dependency installation, database credential updates, and optional SMTP configuration so you can replicate the full project workspace.
+
 **All files are ready to deploy! Just:**
 1. Upload all files to your Hostinger `public_html` folder
 2. Run the SQL script in phpMyAdmin (copy from `create_table.sql`)
