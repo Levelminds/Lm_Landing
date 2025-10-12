@@ -12,7 +12,7 @@
       </div>
       <div class="col-md-8">
         <div class="d-flex justify-content-center align-items-center h-100">
-          <a href="tour.html" class="btn btn-primary btn-lg px-5">Explore More</a>
+          <a href="tour.php" class="btn btn-primary btn-lg px-5">Explore More</a>
         </div>
       </div>
     </div>
@@ -21,8 +21,8 @@
         <small style="color: rgba(15,29,59,0.5);">&copy; 2024 LevelMinds. All rights reserved.</small>
       </div>
       <div class="col-md-6 text-md-end">
-        <a href="privacy-policy.html" style="color: rgba(15,29,59,0.7);" class="me-3">Privacy Policy</a>
-        <a href="terms-conditions.html" style="color: rgba(15,29,59,0.7);">Terms</a>
+        <a href="privacy-policy.php" style="color: rgba(15,29,59,0.7);" class="me-3">Privacy Policy</a>
+        <a href="terms-conditions.php" style="color: rgba(15,29,59,0.7);">Terms</a>
       </div>
     </div>
   </div>
