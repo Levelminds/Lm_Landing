@@ -53,35 +53,6 @@ function formatBlogDate($value): string
     }
 }
 
-function normalizeBlogCategory($value): string
-{
-    $normalized = strtolower(trim((string) $value));
-    $normalized = preg_replace('/[^a-z0-9]+/', '-', $normalized);
-    $normalized = trim((string) $normalized, '-');
-
-    if ($normalized === '') {
-        return 'general';
-    }
-
-    return $normalized;
-}
-
-function resolveBlogCategoryLabel(string $slug, $original, array $labels): string
-{
-    if (isset($labels[$slug])) {
-        return $labels[$slug];
-    }
-
-    $source = trim((string) $original);
-    if ($source === '') {
-        $source = $slug;
-    }
-
-    $source = preg_replace('/[-_]+/', ' ', strtolower($source));
-
-    return ucwords($source ?: 'General Insights');
-}
-
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
@@ -115,40 +86,31 @@ $audienceLabels = [
     'general'  => 'General Insights',
 ];
 
-$normalizedPosts = [];
 $groupedPosts = [];
-
 foreach ($posts as $post) {
-    $categorySlug = normalizeBlogCategory($post['category'] ?? '');
-    $categoryLabel = resolveBlogCategoryLabel($categorySlug, $post['category'] ?? '', $audienceLabels);
+    $category = $post['category'] ?? 'general';
 
-    $post['category_slug'] = $categorySlug;
-    $post['category_label'] = $categoryLabel;
-
-    if (!isset($groupedPosts[$categorySlug])) {
-        $groupedPosts[$categorySlug] = [];
+    if (!isset($groupedPosts[$category])) {
+        $groupedPosts[$category] = [];
     }
 
-    $groupedPosts[$categorySlug][] = $post;
-    $normalizedPosts[] = $post;
+    $groupedPosts[$category][] = $post;
 }
-
-$posts = $normalizedPosts;
 
 if ($featured) {
     $featuredId = (int) ($featured['id'] ?? 0);
-    $featuredCategorySlug = $featured['category_slug'] ?? normalizeBlogCategory($featured['category'] ?? '');
+    $featuredCategory = $featured['category'] ?? 'general';
 
-    if ($featuredId && isset($groupedPosts[$featuredCategorySlug])) {
-        $groupedPosts[$featuredCategorySlug] = array_values(array_filter(
-            $groupedPosts[$featuredCategorySlug],
+    if ($featuredId && isset($groupedPosts[$featuredCategory])) {
+        $groupedPosts[$featuredCategory] = array_values(array_filter(
+            $groupedPosts[$featuredCategory],
             static function ($item) use ($featuredId) {
                 return (int) ($item['id'] ?? 0) !== $featuredId;
             }
         ));
 
-        if (!$groupedPosts[$featuredCategorySlug]) {
-            unset($groupedPosts[$featuredCategorySlug]);
+        if (!$groupedPosts[$featuredCategory]) {
+            unset($groupedPosts[$featuredCategory]);
         }
     }
 }
@@ -163,18 +125,7 @@ foreach ($availableCategories as $category) {
     }
 }
 
-$categoryFilters = ['all' => 'All Posts'];
-foreach ($preferredOrder as $filter) {
-    if (isset($groupedPosts[$filter])) {
-        $categoryFilters[$filter] = resolveBlogCategoryLabel($filter, $filter, $audienceLabels);
-    }
-}
-
-foreach ($availableCategories as $filter) {
-    if (!isset($categoryFilters[$filter])) {
-        $categoryFilters[$filter] = resolveBlogCategoryLabel($filter, $filter, $audienceLabels);
-    }
-}
+$categoryFilters = array_unique(array_merge(['all'], $preferredOrder, array_diff($availableCategories, $preferredOrder)));
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -230,14 +181,14 @@ foreach ($availableCategories as $filter) {
             <li class="nav-item"><a class="nav-link" href="contact.html">Contact</a></li>
           </ul>
           <div class="d-lg-none mt-4 w-100">
-            <a class="btn btn-nav-outline w-100" href="https://www.staging.levelminds.in" target="_blank" rel="noopener">Login / Sign Up</a>
+            <a class="btn btn-nav-outline w-100" href="https://www.staging.levelminds.in" target="_blank" rel="noopener">Login</a>
           </div>
         </div>
       </div>
 
       <div class="d-flex align-items-center gap-3">
         <div class="header-actions d-none d-lg-flex align-items-center gap-2">
-          <a class="btn btn-nav-outline" href="https://www.staging.levelminds.in" target="_blank" rel="noopener">Login / Sign Up</a>
+          <a class="btn btn-nav-outline" href="https://www.staging.levelminds.in" target="_blank" rel="noopener">Login</a>
         </div>
         <button class="fbs__net-navbar-toggler d-lg-none" type="button" data-bs-toggle="offcanvas" data-bs-target="#fbs__net-navbars" aria-controls="fbs__net-navbars" aria-label="Toggle navigation">
           <svg class="fbs__net-icon-menu" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -261,11 +212,10 @@ foreach ($availableCategories as $filter) {
         $featuredDate = formatBlogDate($featured['created_at'] ?? '');
         $featuredViews = (int) ($featured['views'] ?? 0);
         $featuredLikes = (int) ($featured['likes'] ?? 0);
-        $featuredCategorySlug = $featured['category_slug'] ?? normalizeBlogCategory($featured['category'] ?? '');
-        $featuredCategoryLabel = $featured['category_label'] ?? resolveBlogCategoryLabel($featuredCategorySlug, $featured['category'] ?? '', $audienceLabels);
+        $featuredCategory = $featured['category'] ?? 'general';
         $featuredMediaType = strtolower((string) ($featured['media_type'] ?? 'image'));
         $featuredMediaUrl = trim((string) ($featured['media_url'] ?? ''));
-        $featuredShareUrl = sprintf('%s#post-%d', $_SERVER['REQUEST_URI'] ?? 'blogs.php', $featuredId ?: 0);
+        $featuredShareUrl = sprintf('%s#post-%d', htmlspecialchars($_SERVER['REQUEST_URI'] ?? 'blogs.php', ENT_QUOTES, 'UTF-8'), $featuredId ?: 0);
       ?>
       <section class="blog-hero has-featured">
         <div class="container">
@@ -311,7 +261,7 @@ foreach ($availableCategories as $filter) {
               <div class="col-lg-6">
                 <div class="blog-hero__media">
                   <span class="blog-hero__category">
-                    Featured • <?php echo htmlspecialchars($featuredCategoryLabel, ENT_QUOTES, 'UTF-8'); ?>
+                    Featured • <?php echo htmlspecialchars($audienceLabels[$featuredCategory] ?? ucfirst($featuredCategory), ENT_QUOTES, 'UTF-8'); ?>
                   </span>
                   <div class="blog-hero__media-frame ratio ratio-16x9">
                     <?php if ($featuredMediaType === 'video' && $featuredMediaUrl): ?>
@@ -352,9 +302,10 @@ foreach ($availableCategories as $filter) {
           </div>
           <div class="col-lg-6">
             <div class="blog-filter__actions d-flex flex-wrap gap-2 justify-content-lg-end">
-              <?php foreach ($categoryFilters as $filterSlug => $filterLabel): ?>
-                <button class="btn btn-filter<?php echo $filterSlug === 'all' ? ' active' : ''; ?>" type="button" data-filter="<?php echo htmlspecialchars($filterSlug, ENT_QUOTES, 'UTF-8'); ?>">
-                  <?php echo htmlspecialchars($filterLabel, ENT_QUOTES, 'UTF-8'); ?>
+              <?php foreach ($categoryFilters as $filter): ?>
+                <?php $label = $filter === 'all' ? 'All Posts' : ($audienceLabels[$filter] ?? ucfirst($filter)); ?>
+                <button class="btn btn-filter<?php echo $filter === 'all' ? ' active' : ''; ?>" type="button" data-filter="<?php echo htmlspecialchars($filter, ENT_QUOTES, 'UTF-8'); ?>">
+                  <?php echo htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?>
                 </button>
               <?php endforeach; ?>
             </div>
@@ -372,9 +323,9 @@ foreach ($availableCategories as $filter) {
             </div>
           </div>
         <?php else: ?>
-          <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4" id="blogCards">
-            <?php foreach ($orderedCategories as $categorySlug): ?>
-              <?php foreach ($groupedPosts[$categorySlug] as $post): ?>
+          <div class="row g-4" id="blogCards">
+            <?php foreach ($orderedCategories as $category): ?>
+              <?php foreach ($groupedPosts[$category] as $post): ?>
                 <?php
                   $postId = (int) ($post['id'] ?? 0);
                   $postTitle = decodeBlogText($post['title'] ?? '');
@@ -386,12 +337,11 @@ foreach ($availableCategories as $filter) {
                   $postLikes = (int) ($post['likes'] ?? 0);
                   $postMediaType = strtolower((string) ($post['media_type'] ?? 'image'));
                   $postMediaUrl = trim((string) ($post['media_url'] ?? ''));
-                  $shareUrl = sprintf('%s#post-%d', $_SERVER['REQUEST_URI'] ?? 'blogs.php', $postId ?: 0);
-                  $postCategorySlug = $post['category_slug'] ?? $categorySlug;
-                  $postCategoryLabel = $post['category_label'] ?? resolveBlogCategoryLabel($postCategorySlug, $post['category'] ?? '', $audienceLabels);
+                  $shareUrl = sprintf('%s#post-%d', htmlspecialchars($_SERVER['REQUEST_URI'] ?? 'blogs.php', ENT_QUOTES, 'UTF-8'), $postId ?: 0);
+                  $categoryLabel = $audienceLabels[$category] ?? ucfirst($category);
                 ?>
-                <div class="col" data-category="<?php echo htmlspecialchars($postCategorySlug, ENT_QUOTES, 'UTF-8'); ?>">
-                  <article class="blog-card h-100" id="post-<?php echo $postId; ?>">
+                <div class="col-sm-6 col-lg-4" data-category="<?php echo htmlspecialchars($category, ENT_QUOTES, 'UTF-8'); ?>">
+                  <article class="blog-card" id="post-<?php echo $postId; ?>">
                     <div class="blog-card__media ratio ratio-16x9">
                       <?php if ($postMediaType === 'video' && $postMediaUrl): ?>
                         <iframe src="<?php echo htmlspecialchars($postMediaUrl, ENT_QUOTES, 'UTF-8'); ?>" title="<?php echo htmlspecialchars($postTitle, ENT_QUOTES, 'UTF-8'); ?>" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe>
@@ -404,7 +354,7 @@ foreach ($availableCategories as $filter) {
                       <?php endif; ?>
                     </div>
                     <div class="blog-card__body">
-                      <span class="blog-card__category mb-2"><?php echo htmlspecialchars($postCategoryLabel, ENT_QUOTES, 'UTF-8'); ?></span>
+                      <span class="blog-card__category mb-2"><?php echo htmlspecialchars($categoryLabel, ENT_QUOTES, 'UTF-8'); ?></span>
                       <h3 class="blog-card__title"><?php echo htmlspecialchars($postTitle, ENT_QUOTES, 'UTF-8'); ?></h3>
                       <p class="blog-card__summary"><?php echo htmlspecialchars($postSummary, ENT_QUOTES, 'UTF-8'); ?></p>
                       <div class="blog-meta">
