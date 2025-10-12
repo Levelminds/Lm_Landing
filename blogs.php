@@ -397,14 +397,14 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
             <li class="nav-item"><a class="nav-link" href="contact.html">Contact</a></li>
           </ul>
           <div class="d-lg-none mt-4 w-100">
-            <a class="btn btn-nav-outline w-100" href="https://www.staging.levelminds.in" target="_blank" rel="noopener">Login</a>
+            <a class="btn btn-nav-outline w-100" href="https://www.staging.levelminds.in" target="_blank" rel="noopener">Login / Sign Up</a>
           </div>
         </div>
       </div>
 
       <div class="d-flex align-items-center gap-3">
         <div class="header-actions d-none d-lg-flex align-items-center gap-2">
-          <a class="btn btn-nav-outline" href="https://www.staging.levelminds.in" target="_blank" rel="noopener">Login</a>
+          <a class="btn btn-nav-outline" href="https://www.staging.levelminds.in" target="_blank" rel="noopener">Login / Sign Up</a>
         </div>
         <button class="fbs__net-navbar-toggler d-lg-none" type="button" data-bs-toggle="offcanvas" data-bs-target="#fbs__net-navbars" aria-controls="fbs__net-navbars" aria-label="Toggle navigation">
           <svg class="fbs__net-icon-menu" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -580,6 +580,19 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
     </section>
   </main>
 
+  <?php foreach ($posts as $post): ?>
+    <?php
+      $templateId = (int) ($post['id'] ?? 0);
+      if (!$templateId) {
+          continue;
+      }
+      $templateContent = blogFullContent($post);
+    ?>
+    <template id="blog-modal-content-<?php echo $templateId; ?>">
+      <?php echo $templateContent; ?>
+    </template>
+  <?php endforeach; ?>
+
   <?php include 'footer.html'; ?>
 
   <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1080;">
@@ -662,7 +675,12 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
           if (label) {
             label.textContent = liked ? 'Liked' : 'Like';
           }
-        });
+        }
+
+        const modalLink = modalElement.querySelector('.js-modal-link');
+        if (modalLink) {
+          modalLink.href = data.url || '#';
+        }
       }
 
       function updateViewCount(postId, newCount) {
