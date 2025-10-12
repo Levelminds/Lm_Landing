@@ -62,18 +62,6 @@ function normaliseCategory($value): string
     return 'general';
 }
 
-function blogCategoryLabel(string $category): string
-{
-    switch (normaliseCategory($category)) {
-        case 'teachers':
-            return 'Teachers';
-        case 'schools':
-            return 'Schools';
-        default:
-            return 'General';
-    }
-}
-
 function blogExcerpt(array $post, int $limit = 180): string
 {
     $text = decodeBlogText($post['summary'] ?? '');
@@ -236,7 +224,7 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
       height: 100%;
       background: #fff;
       border-radius: 18px;
-      box-shadow: 0 10px 24px rgba(15, 37, 79, 0.07);
+      box-shadow: 0 12px 30px rgba(15, 37, 79, 0.08);
       overflow: hidden;
       display: flex;
       flex-direction: column;
@@ -244,12 +232,8 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
     }
 
     .blog-card:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 16px 32px rgba(15, 37, 79, 0.12);
-    }
-
-    .blog-card__media {
-      min-height: 170px;
+      transform: translateY(-4px);
+      box-shadow: 0 18px 38px rgba(15, 37, 79, 0.12);
     }
 
     .blog-card__media img {
@@ -259,10 +243,10 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
     }
 
     .blog-card__body {
-      padding: 1.25rem 1.35rem 1.5rem;
+      padding: 1.5rem;
       display: flex;
       flex-direction: column;
-      gap: .65rem;
+      gap: .75rem;
     }
 
     .blog-card__category {
@@ -284,7 +268,7 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
     }
 
     .blog-card__title {
-      font-size: 1.05rem;
+      font-size: 1.15rem;
       font-weight: 700;
       color: #0f254f;
       margin: 0;
@@ -292,7 +276,7 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
 
     .blog-card__summary {
       color: #47628b;
-      font-size: .94rem;
+      font-size: .98rem;
     }
 
     .blog-card__meta {
@@ -357,39 +341,6 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
       color: #d83c6b;
     }
 
-    #blogModal .modal-content {
-      border-radius: 20px;
-      border: none;
-      box-shadow: 0 24px 60px rgba(15, 37, 79, 0.18);
-    }
-
-    #blogModal .modal-header {
-      border-bottom: none;
-      padding: 1.5rem 2rem 0.5rem;
-    }
-
-    #blogModal .modal-body {
-      padding: 0 2rem 2rem;
-      color: #1a3663;
-      line-height: 1.7;
-    }
-
-    #blogModal .js-modal-meta {
-      color: #5a739d;
-    }
-
-    #blogModal .modal-footer {
-      border-top: none;
-      padding: 0 2rem 2rem;
-    }
-
-    #blogModal .modal-body img {
-      max-width: 100%;
-      height: auto;
-      border-radius: 16px;
-      margin: 1.25rem 0;
-    }
-
     .blog-categories {
       padding: 4rem 0 5rem;
     }
@@ -414,18 +365,6 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
 
       .blog-hero__card {
         border-radius: 20px;
-      }
-    }
-
-    @media (min-width: 992px) {
-      .blog-card__media {
-        min-height: 200px;
-      }
-    }
-
-    @media (max-width: 575.98px) {
-      .blog-card__body {
-        padding: 1.1rem 1.15rem 1.35rem;
       }
     }
   </style>
@@ -492,7 +431,7 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
             $featuredSummary = blogExcerpt($featured, 220);
             $featuredReadTime = blogReadTime($featured);
             $featuredCategory = normaliseCategory($featured['category'] ?? 'general');
-            $featuredCategoryLabel = blogCategoryLabel($featuredCategory);
+            $featuredCategoryLabel = ucfirst($featuredCategory === 'general' ? 'General' : $featuredCategory);
             $featuredShareUrl = sprintf('%s/blog_single.php?id=%d', $baseShareUrl, $featuredId);
           ?>
           <div class="blog-hero__card">
@@ -521,18 +460,7 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
                       <span><i class="bi bi-eye"></i><span class="js-view-count" data-post-id="<?php echo $featuredId; ?>"><?php echo number_format($featuredViews); ?></span> views</span>
                     </div>
                     <div class="d-flex flex-wrap gap-2">
-                      <a
-                        class="btn btn-read-more js-read-more"
-                        href="#"
-                        role="button"
-                        data-post-id="<?php echo $featuredId; ?>"
-                        data-title="<?php echo htmlspecialchars($featuredTitle, ENT_QUOTES, 'UTF-8'); ?>"
-                        data-author="<?php echo htmlspecialchars($featuredAuthor, ENT_QUOTES, 'UTF-8'); ?>"
-                        data-date="<?php echo htmlspecialchars($featuredDate, ENT_QUOTES, 'UTF-8'); ?>"
-                        data-read-time="<?php echo htmlspecialchars($featuredReadTime, ENT_QUOTES, 'UTF-8'); ?>"
-                        data-category="<?php echo htmlspecialchars($featuredCategoryLabel, ENT_QUOTES, 'UTF-8'); ?>"
-                        data-url="<?php echo htmlspecialchars($featuredShareUrl, ENT_QUOTES, 'UTF-8'); ?>"
-                      >Read More</a>
+                      <a class="btn btn-read-more js-read-more" href="blog_single.php?id=<?php echo $featuredId; ?>" data-post-id="<?php echo $featuredId; ?>">Read More</a>
                       <button class="blog-action js-like" type="button" data-post-id="<?php echo $featuredId; ?>">
                         <i class="bi bi-heart"></i>
                         <span class="js-like-label">Like</span>
@@ -583,7 +511,9 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
             <?php if (!$categoryPosts): ?>
               <?php continue; ?>
             <?php endif; ?>
-            <?php $categoryTitle = blogCategoryLabel($categoryKey); ?>
+            <?php
+              $categoryTitle = $categoryKey === 'general' ? 'General' : ucfirst($categoryKey);
+            ?>
             <div class="category-section" id="category-<?php echo htmlspecialchars($categoryKey, ENT_QUOTES, 'UTF-8'); ?>">
               <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-3">
                 <div>
@@ -625,18 +555,7 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
                             <span><i class="bi bi-eye"></i><span class="js-view-count" data-post-id="<?php echo $postId; ?>"><?php echo number_format($postViews); ?></span></span>
                             <span><i class="bi bi-heart"></i><span class="js-like-count" data-post-id="<?php echo $postId; ?>"><?php echo number_format($postLikes); ?></span></span>
                           </div>
-                          <a
-                            class="btn btn-read-more js-read-more"
-                            href="#"
-                            role="button"
-                            data-post-id="<?php echo $postId; ?>"
-                            data-title="<?php echo htmlspecialchars($postTitle, ENT_QUOTES, 'UTF-8'); ?>"
-                            data-author="<?php echo htmlspecialchars($postAuthor, ENT_QUOTES, 'UTF-8'); ?>"
-                            data-date="<?php echo htmlspecialchars($postDate, ENT_QUOTES, 'UTF-8'); ?>"
-                            data-read-time="<?php echo htmlspecialchars($postReadTime, ENT_QUOTES, 'UTF-8'); ?>"
-                            data-category="<?php echo htmlspecialchars($categoryTitle, ENT_QUOTES, 'UTF-8'); ?>"
-                            data-url="<?php echo htmlspecialchars($shareUrl, ENT_QUOTES, 'UTF-8'); ?>"
-                          >Read More</a>
+                          <a class="btn btn-read-more js-read-more" href="blog_single.php?id=<?php echo $postId; ?>" data-post-id="<?php echo $postId; ?>">Read More</a>
                         </div>
                         <div class="d-flex flex-wrap gap-2 mt-3">
                           <button class="blog-action js-like" type="button" data-post-id="<?php echo $postId; ?>">
@@ -661,48 +580,20 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
     </section>
   </main>
 
-  <?php include 'footer.html'; ?>
+  <?php foreach ($posts as $post): ?>
+    <?php
+      $templateId = (int) ($post['id'] ?? 0);
+      if (!$templateId) {
+          continue;
+      }
+      $templateContent = blogFullContent($post);
+    ?>
+    <template id="blog-modal-content-<?php echo $templateId; ?>">
+      <?php echo $templateContent; ?>
+    </template>
+  <?php endforeach; ?>
 
-  <div class="modal fade" id="blogModal" tabindex="-1" aria-labelledby="blogModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable modal-dialog-centered">
-      <div class="modal-content">
-        <div class="modal-header">
-          <div>
-            <span class="badge rounded-pill bg-primary-subtle text-primary-emphasis mb-2 js-modal-category d-none"></span>
-            <h2 class="modal-title h4 mb-0 js-modal-title" id="blogModalLabel"></h2>
-            <p class="text-muted small mb-0 js-modal-meta d-none"></p>
-          </div>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <div class="js-modal-body"></div>
-        </div>
-        <div class="modal-footer">
-          <div class="d-flex flex-column flex-lg-row align-items-lg-center w-100 gap-3">
-            <div class="d-flex flex-wrap gap-2">
-              <button class="blog-action js-like js-modal-like" type="button" data-post-id="0" aria-pressed="false">
-                <i class="bi bi-heart"></i>
-                <span class="js-like-label">Like</span>
-                <span class="js-like-count" data-post-id="0">0</span>
-              </button>
-              <button class="blog-action js-share js-modal-share" type="button" data-share-title="" data-share-text="" data-share-url="">
-                <i class="bi bi-share"></i>
-                Share
-              </button>
-            </div>
-            <div class="ms-lg-auto">
-              <span class="blog-action disabled d-inline-flex align-items-center gap-2 js-modal-views">
-                <i class="bi bi-eye"></i>
-                <span class="js-view-count js-modal-view-count" data-post-id="0">0</span>
-                <span class="text-muted">views</span>
-              </span>
-            </div>
-          </div>
-          <button type="button" class="btn btn-outline-secondary ms-lg-3" data-bs-dismiss="modal">Close</button>
-        </div>
-      </div>
-    </div>
-  </div>
+  <?php include 'footer.html'; ?>
 
   <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1080;">
     <div id="shareToast" class="toast align-items-center" role="status" aria-live="polite" aria-atomic="true">
@@ -713,61 +604,21 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
     </div>
   </div>
 
+  <script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
+  <script>
+    (function () {
+      const visitorTokenKey = 'lm_visitor_token';
+      const likedPostsKey = 'lm_liked_posts';
+      const storageTestKey = 'lm_storage_test';
 
-<script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
-
-<script>
-  (function () {
-    const visitorTokenKey = 'lm_visitor_token';
-    const likedPostsKey = 'lm_liked_posts';
-    const storageTestKey = 'lm_storage_test';
-
-    const modalElement = document.getElementById('blogModal');
-    const modalBody = modalElement ? modalElement.querySelector('.js-modal-body') : null;
-    const modalTitle = modalElement ? modalElement.querySelector('.js-modal-title') : null;
-    const modalCategory = modalElement ? modalElement.querySelector('.js-modal-category') : null;
-    const modalMeta = modalElement ? modalElement.querySelector('.js-modal-meta') : null;
-    const modalLikeButton = modalElement ? modalElement.querySelector('.js-modal-like') : null;
-    const modalLikeCount = modalElement ? modalElement.querySelector('.js-modal-like .js-like-count') : null;
-    const modalShareButton = modalElement ? modalElement.querySelector('.js-modal-share') : null;
-    const modalViewCount = modalElement ? modalElement.querySelector('.js-modal-view-count') : null;
-
-    const storageAvailable = (() => {
-      try {
-        localStorage.setItem(storageTestKey, '1');
-        localStorage.removeItem(storageTestKey);
-        return true;
-      } catch (error) {
-        console.warn('Local storage is not available; falling back to in-memory session.', error);
-        return false;
-      }
-    })();
-
-    let memoryVisitorToken = null;
-    let memoryLikedPosts = new Set();
-    let likedPosts = new Set();
-
-    function generateVisitorToken() {
-      const random = window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).slice(2);
-      return `lm_${random}`;
-    }
-
-    function ensureVisitorToken() {
-      if (storageAvailable) {
-        try {
-          let token = localStorage.getItem(visitorTokenKey);
-          if (!token) {
-            token = generateVisitorToken();
-            localStorage.setItem(visitorTokenKey, token);
-          }
-          return token;
-        } catch (error) {
-          console.warn('Unable to access localStorage for visitor token, falling back to memory.', error);
+      function ensureVisitorToken() {
+        let token = localStorage.getItem(visitorTokenKey);
+        if (!token) {
+          const random = window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).slice(2);
+          token = `lm_${random}`;
+          localStorage.setItem(visitorTokenKey, token);
         }
-      }
-
-      if (!memoryVisitorToken) {
-        memoryVisitorToken = generateVisitorToken();
+        return token;
       }
 
       return memoryVisitorToken;
@@ -776,81 +627,72 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
     function getLikedPosts() {
       if (storageAvailable) {
         try {
-          const raw = localStorage.getItem(likedPostsKey);
-          if (!raw) {
+          const stored = localStorage.getItem(likedPostsKey);
+          if (!stored) {
             return new Set();
           }
-          const parsed = JSON.parse(raw);
+          const parsed = JSON.parse(stored);
           if (Array.isArray(parsed)) {
             return new Set(parsed.map(Number));
           }
+          return new Set();
         } catch (error) {
-          console.warn('Unable to read liked posts from storage; falling back to in-memory cache.', error);
+          console.error('Unable to read liked posts', error);
+          return new Set();
         }
       }
 
-      return new Set(memoryLikedPosts);
-    }
-
-    function setLikedPosts(set) {
-      memoryLikedPosts = new Set(set);
-
-      if (storageAvailable) {
+      function setLikedPosts(set) {
         try {
           localStorage.setItem(likedPostsKey, JSON.stringify(Array.from(set)));
         } catch (error) {
-          console.warn('Unable to persist liked posts to storage.', error);
+          return String(value);
         }
       }
     }
 
-    function formatNumber(value) {
-      try {
-        return new Intl.NumberFormat().format(value);
-      } catch (error) {
-        return String(value);
+      function formatNumber(value) {
+        try {
+          return new Intl.NumberFormat().format(value);
+        } catch (error) {
+          return String(value);
+        }
       }
     }
 
-    function parseNumberFromText(value) {
-      const digits = String(value || '').replace(/[^0-9]/g, '');
-      return digits ? Number(digits) : 0;
-    }
+      function parseNumberFromText(value) {
+        const digits = String(value || '').replace(/[^0-9]/g, '');
+        return digits ? Number(digits) : 0;
+      }
 
-    function getCurrentLikeCount(postId) {
-      const node = document.querySelector(`.js-like-count[data-post-id="${postId}"]`);
-      return node ? parseNumberFromText(node.textContent) : 0;
-    }
+      function getCurrentLikeCount(postId) {
+        const node = document.querySelector(`.js-like-count[data-post-id="${postId}"]`);
+        return node ? parseNumberFromText(node.textContent) : 0;
+      }
 
-    function updateLikeState(postId, liked, likeCount) {
-      document.querySelectorAll(`.js-like-count[data-post-id="${postId}"]`).forEach((node) => {
-        node.textContent = formatNumber(likeCount);
-      });
+      function updateLikeState(postId, liked, likeCount) {
+        document.querySelectorAll(`.js-like-count[data-post-id="${postId}"]`).forEach((node) => {
+          node.textContent = formatNumber(likeCount);
+        });
 
-      document.querySelectorAll(`.js-like[data-post-id="${postId}"]`).forEach((button) => {
-        button.classList.toggle('is-liked', liked);
-        button.setAttribute('aria-pressed', liked ? 'true' : 'false');
-        const label = button.querySelector('.js-like-label');
-        if (label) {
-          label.textContent = liked ? 'Liked' : 'Like';
+        document.querySelectorAll(`.js-like[data-post-id="${postId}"]`).forEach((button) => {
+          button.classList.toggle('is-liked', liked);
+          button.setAttribute('aria-pressed', liked ? 'true' : 'false');
+          const label = button.querySelector('.js-like-label');
+          if (label) {
+            label.textContent = liked ? 'Liked' : 'Like';
+          }
         }
-      });
-    }
 
-    function updateViewCount(postId, newCount) {
-      document.querySelectorAll(`.js-view-count[data-post-id="${postId}"]`).forEach((node) => {
-        node.textContent = formatNumber(newCount);
-      });
-    }
+        const modalLink = modalElement.querySelector('.js-modal-link');
+        if (modalLink) {
+          modalLink.href = data.url || '#';
+        }
+      }
 
-    async function incrementViews(postId) {
-      try {
-        const response = await fetch('api/update_views.php', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ post_id: postId }),
+      function updateViewCount(postId, newCount) {
+        document.querySelectorAll(`.js-view-count[data-post-id="${postId}"]`).forEach((node) => {
+          node.textContent = new Intl.NumberFormat().format(newCount);
         });
 
         if (!response.ok) {
@@ -866,42 +708,33 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
         console.error(error);
       }
 
-      return null;
-    }
+      async function incrementViews(postId) {
+        try {
+          const response = await fetch('api/views.php', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ post_id: postId }),
+          });
 
-    function buildMeta(author, date, readTime) {
-      return [author, date, readTime].filter(Boolean).join(' • ');
-    }
+          if (!response.ok) {
+            throw new Error('Failed to update views');
+          }
 
-    function setModalLoading() {
-      if (!modalElement) {
-        return;
+          const result = await response.json();
+          if (result && typeof result.views === 'number') {
+            updateViewCount(postId, result.views);
+          }
+        } catch (error) {
+          console.error(error);
+        }
       }
 
-      if (modalTitle) {
-        modalTitle.textContent = 'Loading…';
-      }
-
-      if (modalCategory) {
-        modalCategory.classList.add('d-none');
-      }
-
-      if (modalMeta) {
-        modalMeta.classList.add('d-none');
-        modalMeta.textContent = '';
-      }
-
-      if (modalBody) {
-        modalBody.innerHTML = '<div class="py-5 text-center"><div class="spinner-border text-primary" role="status" aria-hidden="true"></div><p class="mt-3 mb-0 text-muted">Loading story…</p></div>';
-      }
-
-      if (modalLikeButton) {
-        modalLikeButton.dataset.postId = '0';
-        modalLikeButton.classList.remove('is-liked');
-        modalLikeButton.setAttribute('aria-pressed', 'false');
-        const label = modalLikeButton.querySelector('.js-like-label');
-        if (label) {
-          label.textContent = 'Like';
+      async function toggleLike(button, likedPosts) {
+        const postId = Number(button.dataset.postId);
+        if (!postId) {
+          return;
         }
       }
 
@@ -910,201 +743,83 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
         modalLikeCount.textContent = '0';
       }
 
-      if (modalShareButton) {
-        modalShareButton.dataset.shareTitle = '';
-        modalShareButton.dataset.shareText = '';
-        modalShareButton.dataset.shareUrl = '';
-      }
+        button.disabled = true;
+        const wasLiked = likedPosts.has(postId);
 
-      if (modalViewCount) {
-        modalViewCount.dataset.postId = '0';
-        modalViewCount.textContent = '0';
-      }
-    }
+        try {
+          const response = await fetch('blog-like.php', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              post_id: postId,
+              visitor_token: ensureVisitorToken(),
+            }),
+          });
 
-    function setModalError(message) {
-      if (!modalElement) {
-        return;
-      }
+          if (!response.ok) {
+            throw new Error('Unable to toggle like');
+          }
 
-      if (modalTitle) {
-        modalTitle.textContent = 'Blog unavailable';
-      }
+          const result = await response.json();
+          const newLikeCount = Number(result.likes ?? 0);
+          const isLiked = Boolean(result.liked);
 
-      if (modalCategory) {
-        modalCategory.classList.add('d-none');
-      }
+          updateLikeState(postId, isLiked, newLikeCount);
 
-      if (modalMeta) {
-        modalMeta.classList.add('d-none');
-        modalMeta.textContent = '';
-      }
-
-      if (modalBody) {
-        modalBody.innerHTML = `<div class="py-5 text-center text-muted">${message}</div>`;
-      }
-
-      if (modalLikeButton) {
-        modalLikeButton.dataset.postId = '0';
-        modalLikeButton.classList.remove('is-liked');
-        modalLikeButton.setAttribute('aria-pressed', 'false');
-      }
-
-      if (modalLikeCount) {
-        modalLikeCount.dataset.postId = '0';
-        modalLikeCount.textContent = '0';
-      }
-
-      if (modalShareButton) {
-        modalShareButton.dataset.shareTitle = '';
-        modalShareButton.dataset.shareText = '';
-        modalShareButton.dataset.shareUrl = '';
-      }
-
-      if (modalViewCount) {
-        modalViewCount.dataset.postId = '0';
-        modalViewCount.textContent = '0';
-      }
-    }
-
-    function applyModalData(data) {
-      if (!modalElement) {
-        return;
-      }
-
-      if (modalTitle) {
-        modalTitle.textContent = data.title || '';
-      }
-
-      if (modalCategory) {
-        const hasCategory = Boolean(data.category);
-        modalCategory.textContent = hasCategory ? data.category : '';
-        modalCategory.classList.toggle('d-none', !hasCategory);
-      }
-
-      if (modalMeta) {
-        const metaText = buildMeta(data.author, data.date, data.read_time);
-        modalMeta.textContent = metaText;
-        modalMeta.classList.toggle('d-none', metaText === '');
-      }
-
-      if (modalBody) {
-        modalBody.innerHTML = data.content || '<p class="mb-0">Full story coming soon.</p>';
-      }
-
-      if (modalLikeButton) {
-        modalLikeButton.dataset.postId = String(data.id);
-        const isLiked = likedPosts.has(data.id);
-        modalLikeButton.classList.toggle('is-liked', isLiked);
-        modalLikeButton.setAttribute('aria-pressed', isLiked ? 'true' : 'false');
-        const label = modalLikeButton.querySelector('.js-like-label');
-        if (label) {
-          label.textContent = isLiked ? 'Liked' : 'Like';
+          if (isLiked) {
+            likedPosts.add(postId);
+          } else {
+            likedPosts.delete(postId);
+          }
+          setLikedPosts(likedPosts);
+        } catch (error) {
+          console.error(error);
+          updateLikeState(postId, wasLiked, getCurrentLikeCount(postId));
+        } finally {
+          button.disabled = false;
         }
       }
 
-      if (modalLikeCount) {
-        modalLikeCount.dataset.postId = String(data.id);
-        modalLikeCount.textContent = formatNumber(data.likes || 0);
-      }
+      function initialiseLikes() {
+        const likedPosts = getLikedPosts();
 
-      if (modalShareButton) {
-        modalShareButton.dataset.shareTitle = data.title || document.title;
-        modalShareButton.dataset.shareText = data.summary || data.title || '';
-        modalShareButton.dataset.shareUrl = data.share_url || window.location.href;
-      }
+        document.querySelectorAll('.js-like').forEach((button) => {
+          const postId = Number(button.dataset.postId);
+          if (!postId) {
+            return;
+          }
 
-      if (modalViewCount) {
-        modalViewCount.dataset.postId = String(data.id);
-        modalViewCount.textContent = formatNumber(data.views || 0);
-      }
-    }
+          if (likedPosts.has(postId)) {
+            button.classList.add('is-liked');
+            button.setAttribute('aria-pressed', 'true');
+            const label = button.querySelector('.js-like-label');
+            if (label) {
+              label.textContent = 'Liked';
+            }
+          } else {
+            button.setAttribute('aria-pressed', 'false');
+          }
 
-    async function fetchBlog(postId) {
-      const response = await fetch(`api/get_blog.php?id=${encodeURIComponent(postId)}`, {
-        headers: {
-          'Accept': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error('Unable to load blog post');
-      }
-
-      const result = await response.json();
-
-      if (!result || result.success !== true) {
-        const message = result && result.error ? result.error : 'Unable to load blog post';
-        throw new Error(message);
-      }
-
-      return result;
-    }
-
-    async function openModalForPost(anchor) {
-      const postId = Number(anchor.dataset.postId);
-      if (!postId || !modalElement) {
-        return;
-      }
-
-      const modalInstance = bootstrap.Modal.getOrCreateInstance(modalElement);
-      setModalLoading();
-      modalInstance.show();
-
-      try {
-        const data = await fetchBlog(postId);
-        applyModalData(data);
-        updateViewCount(postId, typeof data.views === 'number' ? data.views : 0);
-        await incrementViews(postId);
-      } catch (error) {
-        console.error(error);
-        setModalError('This blog could not be loaded. It might have been removed or unpublished.');
-      }
-    }
-
-    async function toggleLike(button) {
-      const postId = Number(button.dataset.postId);
-      if (!postId) {
-        return;
-      }
-
-      button.disabled = true;
-      const wasLiked = likedPosts.has(postId);
-
-      try {
-        const response = await fetch('api/like.php', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            post_id: postId,
-            visitor_token: ensureVisitorToken(),
-          }),
+          button.addEventListener('click', () => toggleLike(button, likedPosts));
         });
+      }
 
-        if (!response.ok) {
-          throw new Error('Unable to toggle like');
+      async function handleReadMore(event) {
+        const anchor = event.currentTarget;
+        const postId = Number(anchor.dataset.postId);
+        if (!postId) {
+          return;
         }
 
-        const result = await response.json();
-        const newLikeCount = Number(result.likes ?? 0);
-        const isLiked = Boolean(result.liked);
+        event.preventDefault();
+        anchor.classList.add('disabled');
+        anchor.setAttribute('aria-disabled', 'true');
 
-        updateLikeState(postId, isLiked, newLikeCount);
+        await incrementViews(postId);
 
-        if (isLiked) {
-          likedPosts.add(postId);
-        } else {
-          likedPosts.delete(postId);
-        }
-
-        setLikedPosts(likedPosts);
-      } catch (error) {
-        console.error(error);
-        updateLikeState(postId, wasLiked, getCurrentLikeCount(postId));
-      } finally {
-        button.disabled = false;
+        window.location.href = anchor.getAttribute('href');
       }
     }
 
@@ -1146,62 +861,74 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
       const toastEl = document.getElementById('shareToast');
       const toastBody = toastEl ? toastEl.querySelector('.toast-body') : null;
 
-      if (navigator.share) {
-        try {
-          await navigator.share(shareData);
-          if (toastEl && toastBody) {
-            toastBody.textContent = 'Thanks for sharing this story!';
-            bootstrap.Toast.getOrCreateInstance(toastEl).show();
-          }
-          return;
-        } catch (error) {
-          if (error.name === 'AbortError') {
+      async function handleShare(event) {
+        const button = event.currentTarget;
+        const shareData = {
+          title: button.dataset.shareTitle || document.title,
+          text: button.dataset.shareText || 'Check out this blog from LevelMinds',
+          url: button.dataset.shareUrl || window.location.href,
+        };
+
+        const toastEl = document.getElementById('shareToast');
+        const toastBody = toastEl ? toastEl.querySelector('.toast-body') : null;
+
+        if (navigator.share) {
+          try {
+            await navigator.share(shareData);
+            if (toastEl && toastBody) {
+              toastBody.textContent = 'Thanks for sharing this story!';
+              bootstrap.Toast.getOrCreateInstance(toastEl).show();
+            }
             return;
+          } catch (error) {
+            if (error.name === 'AbortError') {
+              return;
+            }
+            console.error('Share failed, falling back to clipboard', error);
           }
           console.error('Share failed, falling back to clipboard', error);
         }
       }
 
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        try {
-          await navigator.clipboard.writeText(shareData.url);
-          if (toastEl && toastBody) {
-            toastBody.textContent = 'Link copied to clipboard!';
-            bootstrap.Toast.getOrCreateInstance(toastEl).show();
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          try {
+            await navigator.clipboard.writeText(shareData.url);
+            if (toastEl && toastBody) {
+              toastBody.textContent = 'Link copied to clipboard!';
+              bootstrap.Toast.getOrCreateInstance(toastEl).show();
+            }
+            return;
+          } catch (error) {
+            console.error('Clipboard fallback failed', error);
           }
-          return;
-        } catch (error) {
-          console.error('Clipboard fallback failed', error);
+        }
+
+        if (toastEl && toastBody) {
+          toastBody.textContent = 'Copy this link manually: ' + shareData.url;
+          bootstrap.Toast.getOrCreateInstance(toastEl).show();
         }
       }
 
-      if (toastEl && toastBody) {
-        toastBody.textContent = 'Copy this link manually: ' + shareData.url;
-        bootstrap.Toast.getOrCreateInstance(toastEl).show();
+      function initialiseReads() {
+        document.querySelectorAll('.js-read-more').forEach((anchor) => {
+          anchor.addEventListener('click', handleReadMore);
+        });
       }
-    }
 
-    function initialiseReads() {
-      document.querySelectorAll('.js-read-more').forEach((anchor) => {
-        anchor.addEventListener('click', handleReadMore);
+      function initialiseShares() {
+        document.querySelectorAll('.js-share').forEach((button) => {
+          button.addEventListener('click', handleShare);
+        });
+      }
+
+      document.addEventListener('DOMContentLoaded', () => {
+        ensureVisitorToken();
+        initialiseLikes();
+        initialiseReads();
+        initialiseShares();
       });
-    }
-
-    function initialiseShares() {
-      document.querySelectorAll('.js-share').forEach((button) => {
-        button.addEventListener('click', handleShare);
-      });
-    }
-
-    document.addEventListener('DOMContentLoaded', () => {
-      ensureVisitorToken();
-      initialiseLikes();
-      initialiseReads();
-      initialiseShares();
-    });
-  })();
-</script>
-
+    })();
+  </script>
 </body>
 
 </html>
