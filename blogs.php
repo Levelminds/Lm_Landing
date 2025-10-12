@@ -153,13 +153,16 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
   <meta name="description" content="Explore the latest LevelMinds stories for teachers, schools, and education leaders.">
   <link rel="icon" href="assets/images/logo/logo.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/images/logo/logo.svg">
+  <link rel="apple-touch-icon" sizes="152x152" href="assets/images/logo/logo.svg">
+  <link rel="apple-touch-icon" sizes="120x120" href="assets/images/logo/logo.svg">
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/images/logo/logo.svg">
+  <link rel="icon" type="image/png" sizes="512x512" href="assets/images/logo/logo.svg">
   <link rel="manifest" href="assets/images/logo/logo.svg">
   <link rel="canonical" href="https://www.levelminds.in/blogs.php">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-
   <link href="assets/vendors/bootstrap/bootstrap.min.css" rel="stylesheet">
   <link href="assets/vendors/bootstrap-icons/font/bootstrap-icons.min.css" rel="stylesheet">
   <link href="assets/css/style.css" rel="stylesheet">
@@ -370,22 +373,10 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
   </style>
 </head>
 
-<body class="blog-page">
-  <header class="fbs__net-navbar navbar navbar-expand-lg navbar-light" aria-label="LevelMinds navbar">
-    <div class="container d-flex align-items-center justify-content-between">
-      <a class="navbar-brand w-auto" href="index.html">
-        <img src="assets/images/logo/logo.svg" alt="LevelMinds" class="logo" height="40">
-      </a>
-
-      <div class="offcanvas offcanvas-start w-75" id="fbs__net-navbars" tabindex="-1" aria-labelledby="fbs__net-navbarsLabel">
-        <div class="offcanvas-header">
-          <div class="offcanvas-header-logo">
-            <a class="logo-link" id="fbs__net-navbarsLabel" href="index.html">
-              <img src="assets/images/logo/logo.svg" alt="LevelMinds" class="logo" height="35">
-            </a>
-          </div>
-          <button class="btn-close text-reset" type="button" data-bs-dismiss="offcanvas" aria-label="Close"></button>
-        </div>
+    .fbs__net-navbar {
+      background-color: #ffffff !important;
+      box-shadow: 0 4px 18px rgba(15, 37, 79, 0.07);
+    }
 
         <div class="offcanvas-body align-items-lg-center">
           <ul class="navbar-nav nav me-auto ps-lg-5 mb-2 mb-lg-0">
@@ -605,6 +596,7 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
   </div>
 
   <script src="assets/vendors/bootstrap/bootstrap.bundle.min.js"></script>
+  <script src="assets/js/footer.js"></script>
   <script>
     (function () {
       const visitorTokenKey = 'lm_visitor_token';
@@ -640,6 +632,8 @@ $baseShareUrl = rtrim(sprintf('%s://%s', $scheme, $hostName), '/');
           console.error('Unable to read liked posts', error);
           return new Set();
         }
+
+        return new Set(memoryLikedPosts);
       }
 
       function setLikedPosts(set) {
