@@ -100,9 +100,7 @@ try {
 
     $post = $statement->fetch(PDO::FETCH_ASSOC);
 
-    $status = strtolower(trim((string) ($post['status'] ?? '')));
-
-    if (!$post || ($status !== 'published' && $status !== 'approved')) {
+    if (!$post || ($post['status'] ?? '') !== 'published') {
         http_response_code(404);
         echo json_encode(['error' => 'Blog post not found']);
         exit;
