@@ -21,6 +21,7 @@
               <li class="nav-item"><a class="nav-link" href="team.html">Team</a></li>
               <li class="nav-item"><a class="nav-link" href="tour.html">Tour</a></li>
               <li class="nav-item"><a class="nav-link" href="blogs.php">Blogs</a></li>
+              <li class="nav-item"><a class="nav-link" href="career.html">Careers</a></li>
               <li class="nav-item"><a class="nav-link" href="contact.html">Contact</a></li>
             </ul>
             <div class="d-lg-none mt-4 w-100">
